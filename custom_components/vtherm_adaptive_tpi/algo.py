@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Mapping
 
-from .adaptive_tpi.controller import compute_on_percent
+from .adaptive_tpi.controller import compute_on_percent, project_gains
 from .adaptive_tpi.diagnostics import build_diagnostics
 from .adaptive_tpi.state import AdaptiveTPIState
 from .adaptive_tpi.supervisor import AdaptiveTPISupervisor
@@ -65,6 +65,14 @@ class AdaptiveTPIAlgorithm:
             self._temperature_available = False
             return
 
+        self._state.k_int, self._state.k_ext = project_gains(
+            phase=self._state.bootstrap_phase,
+            k_int=self._state.k_int,
+            k_ext=self._state.k_ext,
+            a_hat=self._state.a_hat,
+            b_hat=self._state.b_hat,
+            nd_hat=self._state.nd_hat,
+        )
         self._temperature_available = True
         self._state.calculated_on_percent = compute_on_percent(
             hvac_mode=hvac_mode,
