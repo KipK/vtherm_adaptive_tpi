@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Adaptive TPI",
+        "description": "Cree une entree plugin Adaptive TPI.",
+        "data": {
+          "target_vtherm_unique_id": "Unique id du VTherm cible",
+          "minimal_activation_delay": "Delai minimal d'activation",
+          "minimal_deactivation_delay": "Delai minimal de desactivation",
+          "adaptive_tpi_debug": "Activer le mode debug"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Cette entree Adaptive TPI est deja configuree."
+    }
+  }
+}
+

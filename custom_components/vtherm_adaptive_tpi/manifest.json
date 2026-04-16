@@ -1,0 +1,21 @@
+{
+  "domain": "vtherm_adaptive_tpi",
+  "name": "Versatile Thermostat Adaptive TPI",
+  "description": "Adaptive TPI proportional algorithm plugin for Versatile Thermostat",
+  "version": "0.1.0",
+  "config_flow": true,
+  "dependencies": [
+    "versatile_thermostat"
+  ],
+  "requirements": [
+    "vtherm_api@git+https://github.com/KipK/vtherm_api.git@api_algo"
+  ],
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "codeowners": [
+    "@kipk"
+  ],
+  "documentation": "https://github.com/kipk/vtherm_adaptive_tpi",
+  "issue_tracker": "https://github.com/kipk/vtherm_adaptive_tpi/issues"
+}
+

@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Adaptive TPI",
+        "description": "Create an Adaptive TPI plugin entry.",
+        "data": {
+          "target_vtherm_unique_id": "Target VTherm unique id",
+          "minimal_activation_delay": "Minimal activation delay",
+          "minimal_deactivation_delay": "Minimal deactivation delay",
+          "adaptive_tpi_debug": "Enable debug mode"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This Adaptive TPI entry is already configured."
+    }
+  }
+}
+
