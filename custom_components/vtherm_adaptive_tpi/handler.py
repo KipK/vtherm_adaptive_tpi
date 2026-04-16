@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from homeassistant.helpers.storage import Store
 
 from .algo import AdaptiveTPIAlgorithm
+from .adaptive_tpi.state import PERSISTENCE_SCHEMA_VERSION
 from .const import (
     CONF_ADAPTIVE_TPI_DEBUG,
     CONF_MINIMAL_ACTIVATION_DELAY,
@@ -19,6 +22,7 @@ if TYPE_CHECKING:
     from vtherm_api.interfaces import InterfaceThermostatRuntime
 
 _LOGGER = logging.getLogger(__name__)
+_STORAGE_KEY_PREFIX = f"{DOMAIN}.state"
 
 
 class AdaptiveTPIHandler:
@@ -28,6 +32,12 @@ class AdaptiveTPIHandler:
         """Initialize handler with parent thermostat reference."""
         self._thermostat = thermostat
         self._should_publish_intermediate = True
+        storage_key = self._build_storage_key(thermostat.unique_id)
+        self._store: Store[dict[str, Any]] = Store(
+            thermostat.hass,
+            PERSISTENCE_SCHEMA_VERSION,
+            storage_key,
+        )
 
     def init_algorithm(self) -> None:
         """Initialize Adaptive TPI algorithm."""
@@ -73,12 +83,14 @@ class AdaptiveTPIHandler:
 
     async def async_added_to_hass(self) -> None:
         """Run startup actions when the thermostat entity is added."""
+        await self._async_load_persisted_state()
 
     async def async_startup(self) -> None:
         """Run startup actions after thermostat initialization."""
 
     def remove(self) -> None:
         """Release resources held by the handler."""
+        self._thermostat.hass.async_create_task(self._async_save_persisted_state())
 
     async def control_heating(
         self,
@@ -138,3 +150,55 @@ class AdaptiveTPIHandler:
         """Return True when VT may publish intermediate thermostat states."""
         return self._should_publish_intermediate
 
+    @staticmethod
+    def _build_storage_key(unique_id: str) -> str:
+        """Build a stable storage key for one thermostat instance."""
+        return f"{_STORAGE_KEY_PREFIX}.{unique_id.replace('.', '_')}"
+
+    async def _async_load_persisted_state(self) -> None:
+        """Load the persisted state and keep defaults on any invalid payload."""
+        t = self._thermostat
+        if t.prop_algorithm is None:
+            return
+
+        data = await self._store.async_load()
+        if not data:
+            return
+
+        if not isinstance(data, dict):
+            _LOGGER.warning(
+                "%s - Ignoring persisted Adaptive TPI state because payload is not a mapping",
+                t,
+            )
+            return
+
+        schema_version = data.get("schema_version")
+        if schema_version != PERSISTENCE_SCHEMA_VERSION:
+            _LOGGER.info(
+                "%s - Ignoring persisted Adaptive TPI state due to unsupported schema version: %s",
+                t,
+                schema_version,
+            )
+            return
+
+        state_data = data.get("state")
+        if not isinstance(state_data, dict):
+            _LOGGER.warning(
+                "%s - Ignoring persisted Adaptive TPI state because 'state' is invalid",
+                t,
+            )
+            return
+
+        t.prop_algorithm.load_state(state_data)
+
+    async def _async_save_persisted_state(self) -> None:
+        """Save the minimal adaptive state required across reloads."""
+        t = self._thermostat
+        if t.prop_algorithm is None:
+            return
+
+        payload = {
+            "schema_version": PERSISTENCE_SCHEMA_VERSION,
+            "state": t.prop_algorithm.save_state(),
+        }
+        await self._store.async_save(payload)

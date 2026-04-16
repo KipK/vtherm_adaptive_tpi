@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+from typing import Any, Mapping
+
 from .adaptive_tpi.controller import compute_on_percent
 from .adaptive_tpi.diagnostics import build_diagnostics
 from .adaptive_tpi.state import AdaptiveTPIState
 from .const import DEFAULT_KEXT, DEFAULT_KINT
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class AdaptiveTPIAlgorithm:
@@ -63,23 +68,20 @@ class AdaptiveTPIAlgorithm:
 
     def save_state(self) -> dict:
         """Return a persistable algorithm snapshot."""
-        return {
-            "k_int": self._state.k_int,
-            "k_ext": self._state.k_ext,
-            "nd_hat": self._state.nd_hat,
-            "a_hat": self._state.a_hat,
-            "b_hat": self._state.b_hat,
-        }
+        return self._state.to_persisted_dict()
 
-    def load_state(self, data: dict) -> None:
+    def load_state(self, data: Mapping[str, Any] | None) -> None:
         """Load a persistable algorithm snapshot."""
         if not data:
             return
-        self._state.k_int = float(data.get("k_int", self._state.k_int))
-        self._state.k_ext = float(data.get("k_ext", self._state.k_ext))
-        self._state.nd_hat = float(data.get("nd_hat", self._state.nd_hat))
-        self._state.a_hat = float(data.get("a_hat", self._state.a_hat))
-        self._state.b_hat = float(data.get("b_hat", self._state.b_hat))
+        try:
+            self._state.apply_persisted_dict(data)
+        except (AttributeError, TypeError, ValueError) as err:
+            _LOGGER.warning(
+                "%s - Ignoring invalid persisted Adaptive TPI state: %s",
+                self._name,
+                err,
+            )
 
     def get_diagnostics(self) -> dict:
         """Return a compact diagnostics payload."""
@@ -96,4 +98,3 @@ class AdaptiveTPIAlgorithm:
     def calculated_on_percent(self) -> float:
         """Return the raw calculated heating fraction."""
         return self._state.calculated_on_percent
-
