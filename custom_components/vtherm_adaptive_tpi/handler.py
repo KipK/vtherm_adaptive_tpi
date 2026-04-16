@@ -127,6 +127,8 @@ class AdaptiveTPIHandler:
 
         on_percent = t.on_percent
         if on_percent is None:
+            if hasattr(t.prop_algorithm, "reject_cycle"):
+                t.prop_algorithm.reject_cycle("missing_temperature")
             _LOGGER.info(
                 "%s - on_percent is None (temperature unavailable). Skipping cycle.",
                 t,
@@ -145,6 +147,16 @@ class AdaptiveTPIHandler:
     def on_scheduler_ready(self, scheduler) -> None:
         """Bind the handler to the cycle scheduler."""
         del scheduler
+
+    def update_attributes(self) -> None:
+        """Expose the current Adaptive TPI diagnostics on the thermostat."""
+        t = self._thermostat
+        if t.prop_algorithm is None:
+            return
+
+        t._attr_extra_state_attributes["specific_states"].update({
+            "adaptive_tpi": t.prop_algorithm.get_diagnostics(),
+        })
 
     def should_publish_intermediate(self) -> bool:
         """Return True when VT may publish intermediate thermostat states."""
