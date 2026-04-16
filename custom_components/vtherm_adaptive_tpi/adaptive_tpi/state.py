@@ -41,10 +41,18 @@ class AdaptiveTPIState:
     nd_hat: float = 0.0
     a_hat: float = 0.0
     b_hat: float = 0.0
+    c_nd: float = 0.0
+    c_a: float = 0.0
+    c_b: float = 0.0
+    i_a: float = 0.0
+    i_b: float = 0.0
     on_percent: float = 0.0
     calculated_on_percent: float = 0.0
     bootstrap_phase: str = DEFAULT_BOOTSTRAP_PHASE
+    accepted_cycles_count: int = 0
     last_freeze_reason: str | None = None
+    hours_without_excitation: float = 0.0
+    cycle_min_at_last_accepted_cycle: float | None = None
 
     def to_persisted_dict(self) -> dict[str, float | str]:
         """Return the minimal state that must survive restarts."""

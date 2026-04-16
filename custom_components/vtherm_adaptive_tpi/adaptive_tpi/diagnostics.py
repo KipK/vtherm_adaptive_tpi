@@ -14,6 +14,14 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
         "nd_hat": state.nd_hat,
         "a_hat": state.a_hat,
         "b_hat": state.b_hat,
+        "c_nd": state.c_nd,
+        "c_a": state.c_a,
+        "c_b": state.c_b,
+        "i_a": state.i_a,
+        "i_b": state.i_b,
+        "accepted_cycles_count": state.accepted_cycles_count,
+        "hours_without_excitation": state.hours_without_excitation,
+        "cycle_min_at_last_accepted_cycle": state.cycle_min_at_last_accepted_cycle,
         "last_freeze_reason": state.last_freeze_reason,
     }
     if debug_mode:
