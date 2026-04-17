@@ -49,7 +49,11 @@ class AdaptiveTPIState:
     on_percent: float = 0.0
     calculated_on_percent: float = 0.0
     bootstrap_phase: str = DEFAULT_BOOTSTRAP_PHASE
+    valid_cycles_count: int = 0
+    informative_deadtime_cycles_count: int = 0
     accepted_cycles_count: int = 0
+    adaptive_cycles_since_phase_c: int = 0
+    last_cycle_classification: str = "idle"
     last_freeze_reason: str | None = None
     hours_without_excitation: float = 0.0
     cycle_min_at_last_accepted_cycle: float | None = None

@@ -67,6 +67,7 @@ class AdaptiveTPIAlgorithm:
         self._supervisor.apply_to_state(self._state)
 
         if decision.classification == "accepted" and ext_current_temp is not None and target_temp is not None and current_temp is not None:
+            self._state.valid_cycles_count += 1
             deadtime_result = self._deadtime_model.record_accepted_observation(
                 DeadtimeObservation(
                     tin=current_temp,
@@ -82,6 +83,8 @@ class AdaptiveTPIAlgorithm:
             self._state.deadtime_best_candidate = deadtime_result.best_candidate
             self._state.deadtime_second_best_candidate = deadtime_result.second_best_candidate
             self._state.deadtime_candidate_costs = deadtime_result.candidate_costs
+            if deadtime_result.candidate_costs:
+                self._state.informative_deadtime_cycles_count += 1
             cycle_min = kwargs.get("cycle_min")
             if isinstance(cycle_min, (int, float)):
                 self._state.cycle_min_at_last_accepted_cycle = float(cycle_min)
@@ -95,10 +98,13 @@ class AdaptiveTPIAlgorithm:
                 nd_hat=self._state.nd_hat,
                 c_nd=self._state.c_nd,
             )
+            estimator_updated = False
             if estimator_sample is not None:
                 self._state.i_a = estimator_sample.i_a
                 self._state.i_b = estimator_sample.i_b
-            if self._supervisor.allow_estimator_update(
+            if estimator_sample is not None and estimator_sample.i_global <= 0.0:
+                self._supervisor.finalize_non_informative_cycle()
+            elif self._supervisor.allow_estimator_update(
                 deadtime_locked=deadtime_result.locked,
                 c_nd=deadtime_result.c_nd,
             ):
@@ -109,6 +115,12 @@ class AdaptiveTPIAlgorithm:
                 self._state.c_b = estimator_update.c_b
                 self._state.i_a = estimator_update.i_a
                 self._state.i_b = estimator_update.i_b
+                estimator_updated = estimator_update.updated
+            self._supervisor.update_phase_progression(
+                self._state,
+                deadtime_costs_available=bool(deadtime_result.candidate_costs),
+                estimator_updated=estimator_updated,
+            )
             self._supervisor.apply_to_state(self._state)
 
         if target_temp is None or current_temp is None:
