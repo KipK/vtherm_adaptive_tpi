@@ -132,6 +132,19 @@ class AdaptiveTPISupervisor:
 
         self.last_freeze_reason = None
 
+    def allow_estimator_update(self, *, deadtime_locked: bool, c_nd: float) -> bool:
+        """Return True when the estimator may consume the current accepted cycle."""
+        if not deadtime_locked:
+            self.last_freeze_reason = "deadtime_not_locked"
+            return False
+
+        if c_nd < CONFIDENCE_LOCK_THRESHOLD:
+            self.last_freeze_reason = "deadtime_confidence_low"
+            return False
+
+        self.last_freeze_reason = None
+        return True
+
     def apply_to_state(self, state: AdaptiveTPIState) -> None:
         """Synchronize the supervisor placeholders into the runtime state."""
         state.bootstrap_phase = self.phase

@@ -82,6 +82,11 @@ class DeadtimeModel:
         """Return the number of accepted observations tracked by the model."""
         return len(self._accepted_observations)
 
+    @property
+    def accepted_observations(self) -> tuple[DeadtimeObservation, ...]:
+        """Expose the accepted observations for downstream estimators."""
+        return tuple(self._accepted_observations)
+
     def reset(self) -> None:
         """Reset the deadtime state."""
         self._accepted_observations.clear()

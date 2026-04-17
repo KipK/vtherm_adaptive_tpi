@@ -8,6 +8,7 @@ from typing import Any, Mapping
 from .adaptive_tpi.controller import compute_on_percent, project_gains
 from .adaptive_tpi.deadtime import DeadtimeModel, DeadtimeObservation
 from .adaptive_tpi.diagnostics import build_diagnostics
+from .adaptive_tpi.estimator import ParameterEstimator, build_estimator_sample
 from .adaptive_tpi.state import AdaptiveTPIState
 from .adaptive_tpi.supervisor import AdaptiveTPISupervisor
 from .const import DEFAULT_KEXT, DEFAULT_KINT
@@ -34,6 +35,9 @@ class AdaptiveTPIAlgorithm:
         )
         self._supervisor = AdaptiveTPISupervisor(phase=self._state.bootstrap_phase)
         self._deadtime_model = DeadtimeModel()
+        self._estimator = ParameterEstimator()
+        self._state.a_hat = self._estimator.a_hat
+        self._state.b_hat = self._estimator.b_hat
         self._temperature_available = False
 
     def calculate(
@@ -86,6 +90,25 @@ class AdaptiveTPIAlgorithm:
                 confidence=deadtime_result.c_nd,
                 lock_reason=deadtime_result.lock_reason,
             )
+            estimator_sample = build_estimator_sample(
+                self._deadtime_model.accepted_observations,
+                nd_hat=self._state.nd_hat,
+                c_nd=self._state.c_nd,
+            )
+            if estimator_sample is not None:
+                self._state.i_a = estimator_sample.i_a
+                self._state.i_b = estimator_sample.i_b
+            if self._supervisor.allow_estimator_update(
+                deadtime_locked=deadtime_result.locked,
+                c_nd=deadtime_result.c_nd,
+            ):
+                estimator_update = self._estimator.update(estimator_sample)
+                self._state.a_hat = estimator_update.a_hat
+                self._state.b_hat = estimator_update.b_hat
+                self._state.c_a = estimator_update.c_a
+                self._state.c_b = estimator_update.c_b
+                self._state.i_a = estimator_update.i_a
+                self._state.i_b = estimator_update.i_b
             self._supervisor.apply_to_state(self._state)
 
         if target_temp is None or current_temp is None:
@@ -127,6 +150,16 @@ class AdaptiveTPIAlgorithm:
             return
         try:
             self._state.apply_persisted_dict(data)
+            self._estimator.restore(
+                a_hat=self._state.a_hat,
+                b_hat=self._state.b_hat,
+                c_a=self._state.c_a,
+                c_b=self._state.c_b,
+            )
+            self._state.a_hat = self._estimator.a_hat
+            self._state.b_hat = self._estimator.b_hat
+            self._state.c_a = self._estimator.c_a
+            self._state.c_b = self._estimator.c_b
             self._supervisor.set_phase(self._state.bootstrap_phase)
             self._supervisor.apply_to_state(self._state)
         except (AttributeError, TypeError, ValueError) as err:
