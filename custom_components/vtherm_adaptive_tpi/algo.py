@@ -6,6 +6,7 @@ import logging
 from typing import Any, Mapping
 
 from .adaptive_tpi.controller import compute_on_percent, project_gains
+from .adaptive_tpi.deadtime import DeadtimeModel, DeadtimeObservation
 from .adaptive_tpi.diagnostics import build_diagnostics
 from .adaptive_tpi.state import AdaptiveTPIState
 from .adaptive_tpi.supervisor import AdaptiveTPISupervisor
@@ -32,6 +33,7 @@ class AdaptiveTPIAlgorithm:
             k_ext=DEFAULT_KEXT,
         )
         self._supervisor = AdaptiveTPISupervisor(phase=self._state.bootstrap_phase)
+        self._deadtime_model = DeadtimeModel()
         self._temperature_available = False
 
     def calculate(
@@ -46,7 +48,7 @@ class AdaptiveTPIAlgorithm:
         """Compute the current on_percent using the placeholder controller."""
         del slope
 
-        self._supervisor.evaluate_runtime_conditions(
+        decision = self._supervisor.evaluate_runtime_conditions(
             target_temp=target_temp,
             current_temp=current_temp,
             outdoor_temp=ext_current_temp,
@@ -59,6 +61,32 @@ class AdaptiveTPIAlgorithm:
             setpoint_transition_active=bool(kwargs.get("setpoint_transition_active", False)),
         )
         self._supervisor.apply_to_state(self._state)
+
+        if decision.classification == "accepted" and ext_current_temp is not None and target_temp is not None and current_temp is not None:
+            deadtime_result = self._deadtime_model.record_accepted_observation(
+                DeadtimeObservation(
+                    tin=current_temp,
+                    tout=ext_current_temp,
+                    target_temp=target_temp,
+                    applied_power=self._state.on_percent,
+                )
+            )
+            self._state.accepted_cycles_count = self._deadtime_model.accepted_cycle_count
+            self._state.nd_hat = deadtime_result.nd_hat
+            self._state.c_nd = deadtime_result.c_nd
+            self._state.deadtime_locked = deadtime_result.locked
+            self._state.deadtime_best_candidate = deadtime_result.best_candidate
+            self._state.deadtime_second_best_candidate = deadtime_result.second_best_candidate
+            self._state.deadtime_candidate_costs = deadtime_result.candidate_costs
+            cycle_min = kwargs.get("cycle_min")
+            if isinstance(cycle_min, (int, float)):
+                self._state.cycle_min_at_last_accepted_cycle = float(cycle_min)
+            self._supervisor.apply_deadtime_result(
+                locked=deadtime_result.locked,
+                confidence=deadtime_result.c_nd,
+                lock_reason=deadtime_result.lock_reason,
+            )
+            self._supervisor.apply_to_state(self._state)
 
         if target_temp is None or current_temp is None:
             self._state.calculated_on_percent = 0.0

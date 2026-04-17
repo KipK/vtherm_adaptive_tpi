@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .deadtime import CONFIDENCE_LOCK_THRESHOLD
 from .state import AdaptiveTPIState, DEFAULT_BOOTSTRAP_PHASE
 
 PHASE_STARTUP = DEFAULT_BOOTSTRAP_PHASE
@@ -118,6 +119,18 @@ class AdaptiveTPISupervisor:
             return self.reject_cycle("setpoint_transition")
 
         return self.accept_cycle()
+
+    def apply_deadtime_result(self, *, locked: bool, confidence: float, lock_reason: str | None) -> None:
+        """Freeze adaptation while deadtime remains uncertain."""
+        if not locked:
+            self.last_freeze_reason = lock_reason or "deadtime_not_locked"
+            return
+
+        if confidence < CONFIDENCE_LOCK_THRESHOLD:
+            self.last_freeze_reason = "deadtime_confidence_low"
+            return
+
+        self.last_freeze_reason = None
 
     def apply_to_state(self, state: AdaptiveTPIState) -> None:
         """Synchronize the supervisor placeholders into the runtime state."""

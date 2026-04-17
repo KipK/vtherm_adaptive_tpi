@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 PERSISTENCE_SCHEMA_VERSION = 1
@@ -53,6 +53,10 @@ class AdaptiveTPIState:
     last_freeze_reason: str | None = None
     hours_without_excitation: float = 0.0
     cycle_min_at_last_accepted_cycle: float | None = None
+    deadtime_locked: bool = False
+    deadtime_best_candidate: float | None = None
+    deadtime_second_best_candidate: float | None = None
+    deadtime_candidate_costs: dict[str, float] = field(default_factory=dict)
 
     def to_persisted_dict(self) -> dict[str, float | str]:
         """Return the minimal state that must survive restarts."""

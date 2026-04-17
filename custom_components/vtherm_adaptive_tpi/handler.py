@@ -111,6 +111,7 @@ class AdaptiveTPIHandler:
                 t.vtherm_hvac_mode,
                 power_shedding=t.power_manager.is_overpowering_detected,
                 off_reason=t.hvac_off_reason,
+                cycle_min=t.cycle_min,
             )
 
         if t.vtherm_hvac_mode is not None and str(t.vtherm_hvac_mode).lower().endswith("off"):

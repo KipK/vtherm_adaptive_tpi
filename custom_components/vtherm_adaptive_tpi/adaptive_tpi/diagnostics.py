@@ -22,6 +22,10 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
         "accepted_cycles_count": state.accepted_cycles_count,
         "hours_without_excitation": state.hours_without_excitation,
         "cycle_min_at_last_accepted_cycle": state.cycle_min_at_last_accepted_cycle,
+        "deadtime_locked": state.deadtime_locked,
+        "deadtime_best_candidate": state.deadtime_best_candidate,
+        "deadtime_second_best_candidate": state.deadtime_second_best_candidate,
+        "deadtime_candidate_costs": state.deadtime_candidate_costs,
         "last_freeze_reason": state.last_freeze_reason,
     }
     if debug_mode:
