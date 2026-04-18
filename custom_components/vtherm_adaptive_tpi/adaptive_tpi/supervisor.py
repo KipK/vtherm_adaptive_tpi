@@ -150,14 +150,22 @@ class AdaptiveTPISupervisor:
 
         self.last_freeze_reason = None
 
-    def allow_estimator_update(self, *, deadtime_locked: bool, c_nd: float) -> bool:
-        """Return True when the estimator may consume the current accepted cycle."""
+    def allow_b_update(self) -> bool:
+        """Return True when `b` may learn from an OFF or quasi-OFF cycle."""
+        return True
+
+    def allow_a_update(self, *, deadtime_locked: bool, c_nd: float, b_converged: bool) -> bool:
+        """Return True when the `a` estimator may consume the current accepted cycle."""
         if not deadtime_locked:
             self.last_freeze_reason = "deadtime_not_locked"
             return False
 
         if c_nd < CONFIDENCE_LOCK_THRESHOLD:
             self.last_freeze_reason = "deadtime_confidence_low"
+            return False
+
+        if not b_converged:
+            self.last_freeze_reason = "b_not_converged"
             return False
 
         self.last_freeze_reason = None
@@ -182,7 +190,11 @@ class AdaptiveTPISupervisor:
                 self.advance_phase(PHASE_B)
 
         if self.phase == PHASE_B:
-            if state.deadtime_locked and state.c_nd >= CONFIDENCE_LOCK_THRESHOLD:
+            if (
+                state.deadtime_locked
+                and state.c_nd >= CONFIDENCE_LOCK_THRESHOLD
+                and state.b_converged
+            ):
                 self.advance_phase(PHASE_C)
                 state.adaptive_cycles_since_phase_c = 0
 

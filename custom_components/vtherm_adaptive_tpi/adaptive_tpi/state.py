@@ -71,8 +71,15 @@ class AdaptiveTPIState:
     c_nd: float = 0.0
     c_a: float = 0.0
     c_b: float = 0.0
+    b_converged: bool = False
     i_a: float = 0.0
     i_b: float = 0.0
+    a_samples_count: int = 0
+    b_samples_count: int = 0
+    a_last_reason: str | None = None
+    b_last_reason: str | None = None
+    a_dispersion: float = 0.0
+    b_dispersion: float = 0.0
     on_percent: float = 0.0
     calculated_on_percent: float = 0.0
     bootstrap_phase: str = DEFAULT_BOOTSTRAP_PHASE
@@ -100,8 +107,15 @@ class AdaptiveTPIState:
             "c_nd": self.c_nd,
             "c_a": self.c_a,
             "c_b": self.c_b,
+            "b_converged": self.b_converged,
             "i_a": self.i_a,
             "i_b": self.i_b,
+            "a_samples_count": self.a_samples_count,
+            "b_samples_count": self.b_samples_count,
+            "a_last_reason": self.a_last_reason,
+            "b_last_reason": self.b_last_reason,
+            "a_dispersion": self.a_dispersion,
+            "b_dispersion": self.b_dispersion,
             "bootstrap_phase": self.bootstrap_phase,
             "valid_cycles_count": self.valid_cycles_count,
             "informative_deadtime_cycles_count": self.informative_deadtime_cycles_count,
@@ -127,6 +141,8 @@ class AdaptiveTPIState:
             "c_nd",
             "c_a",
             "c_b",
+            "a_dispersion",
+            "b_dispersion",
             "i_a",
             "i_b",
             "hours_without_excitation",
@@ -148,6 +164,8 @@ class AdaptiveTPIState:
             "informative_deadtime_cycles_count",
             "accepted_cycles_count",
             "adaptive_cycles_since_phase_c",
+            "a_samples_count",
+            "b_samples_count",
         )
         for field_name in int_fields:
             value = _coerce_int(data.get(field_name))
@@ -157,18 +175,26 @@ class AdaptiveTPIState:
         if isinstance(data.get("deadtime_locked"), bool):
             self.deadtime_locked = data["deadtime_locked"]
 
+        if isinstance(data.get("b_converged"), bool):
+            self.b_converged = data["b_converged"]
+
         candidate_costs = _coerce_str_float_dict(data.get("deadtime_candidate_costs"))
         if candidate_costs is not None:
             self.deadtime_candidate_costs = candidate_costs
 
         if isinstance(data.get("last_freeze_reason"), str):
             self.last_freeze_reason = data["last_freeze_reason"]
+        if isinstance(data.get("a_last_reason"), str):
+            self.a_last_reason = data["a_last_reason"]
+        if isinstance(data.get("b_last_reason"), str):
+            self.b_last_reason = data["b_last_reason"]
 
     def reset_confidences(self) -> None:
         """Reset adaptive confidences and transient trust markers."""
         self.c_nd = 0.0
         self.c_a = 0.0
         self.c_b = 0.0
+        self.b_converged = False
         self.deadtime_locked = False
         self.deadtime_candidate_costs = {}
         self.deadtime_best_candidate = None

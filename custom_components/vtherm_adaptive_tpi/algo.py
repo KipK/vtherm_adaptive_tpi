@@ -10,7 +10,12 @@ from typing import Any, Mapping
 from .adaptive_tpi.controller import compute_on_percent, project_gains
 from .adaptive_tpi.deadtime import DeadtimeModel, DeadtimeObservation
 from .adaptive_tpi.diagnostics import build_diagnostics
-from .adaptive_tpi.estimator import ParameterEstimator, build_estimator_sample
+from .adaptive_tpi.estimator import ASample, BSample, ParameterEstimator
+from .adaptive_tpi.learning_window import (
+    WINDOW_REGIME_OFF,
+    WINDOW_REGIME_ON,
+    build_learning_window,
+)
 from .adaptive_tpi.state import AdaptiveTPIState
 from .adaptive_tpi.supervisor import AdaptiveTPISupervisor, PHASE_A, PHASE_B
 from .const import DEFAULT_KEXT, DEFAULT_KINT
@@ -163,6 +168,7 @@ class AdaptiveTPIAlgorithm:
         if elapsed_ratio < 1.0:
             self._record_cycle_history(
                 pending_cycle,
+                cycle_duration_min=cycle_duration_min or 5.0,
                 is_valid=False,
                 is_informative=False,
                 is_estimator_informative=False,
@@ -181,6 +187,7 @@ class AdaptiveTPIAlgorithm:
         if decision.classification != "accepted":
             self._record_cycle_history(
                 pending_cycle,
+                cycle_duration_min=cycle_duration_min or 5.0,
                 is_valid=False,
                 is_informative=False,
                 is_estimator_informative=False,
@@ -199,6 +206,7 @@ class AdaptiveTPIAlgorithm:
         if not deadtime_informative and not estimator_informative:
             self._record_cycle_history(
                 pending_cycle,
+                cycle_duration_min=cycle_duration_min or 5.0,
                 is_valid=True,
                 is_informative=False,
                 is_estimator_informative=False,
@@ -218,6 +226,7 @@ class AdaptiveTPIAlgorithm:
             self._state.informative_deadtime_cycles_count += 1
         deadtime_result = self._deadtime_model.record_cycle(
             self._make_deadtime_observation(pending_cycle),
+            cycle_duration_min=cycle_duration_min or 5.0,
             is_valid=True,
             is_informative=deadtime_informative,
             is_estimator_informative=estimator_informative,
@@ -233,37 +242,67 @@ class AdaptiveTPIAlgorithm:
             confidence=deadtime_result.c_nd,
             lock_reason=deadtime_result.lock_reason,
         )
-        estimator_sample = build_estimator_sample(
+        estimator_updated = False
+        off_window = build_learning_window(
             self._deadtime_model.cycle_history,
             nd_hat=self._state.nd_hat,
-            c_nd=self._state.c_nd,
+            regime=WINDOW_REGIME_OFF,
         )
-        estimator_updated = False
-        if estimator_sample is not None:
-            self._state.i_a = estimator_sample.i_a
-            self._state.i_b = estimator_sample.i_b
-        a_excited = (
-            estimator_sample is not None
-            and min(estimator_sample.i_a, estimator_sample.i_e) > 0.0
+        on_window = build_learning_window(
+            self._deadtime_model.cycle_history,
+            nd_hat=self._state.nd_hat,
+            regime=WINDOW_REGIME_ON,
         )
-        b_excited = (
-            estimator_sample is not None
-            and min(estimator_sample.i_b, estimator_sample.i_e) > 0.0
-        )
-        if estimator_sample is not None and not a_excited and not b_excited:
-            self._supervisor.finalize_non_informative_cycle()
-        elif self._supervisor.allow_estimator_update(
+
+        estimator_update = None
+        if (
+            off_window.sample is not None
+            and self._supervisor.allow_b_update()
+        ):
+            estimator_update = self._estimator.update_b(
+                BSample(
+                    dTdt=off_window.sample.dTdt,
+                    delta_out=off_window.sample.delta_out,
+                    setpoint_error=off_window.sample.setpoint_error,
+                    u_eff=off_window.sample.u_eff,
+                ),
+                reason=off_window.reason,
+            )
+        elif on_window.sample is not None and self._supervisor.allow_a_update(
             deadtime_locked=deadtime_result.locked,
             c_nd=deadtime_result.c_nd,
+            b_converged=self._state.b_converged,
         ):
-            estimator_update = self._estimator.update(estimator_sample)
+            estimator_update = self._estimator.update_a(
+                ASample(
+                    dTdt=on_window.sample.dTdt,
+                    delta_out=on_window.sample.delta_out,
+                    setpoint_error=on_window.sample.setpoint_error,
+                    u_eff=on_window.sample.u_eff,
+                ),
+                reason=on_window.reason,
+            )
+        else:
+            self._state.a_last_reason = self._supervisor.last_freeze_reason or on_window.reason
+            self._state.b_last_reason = off_window.reason
+
+        if estimator_update is not None:
             self._state.a_hat = estimator_update.a_hat
             self._state.b_hat = estimator_update.b_hat
             self._state.c_a = estimator_update.c_a
             self._state.c_b = estimator_update.c_b
+            self._state.b_converged = estimator_update.b_converged
             self._state.i_a = estimator_update.i_a
             self._state.i_b = estimator_update.i_b
+            self._state.a_samples_count = estimator_update.a_samples_count
+            self._state.b_samples_count = estimator_update.b_samples_count
+            self._state.a_last_reason = estimator_update.a_last_reason
+            self._state.b_last_reason = estimator_update.b_last_reason
+            self._state.a_dispersion = estimator_update.a_dispersion
+            self._state.b_dispersion = estimator_update.b_dispersion
             estimator_updated = estimator_update.updated
+        elif off_window.sample is None and on_window.sample is None:
+            self._supervisor.finalize_non_informative_cycle()
         self._supervisor.update_phase_progression(
             self._state,
             deadtime_costs_available=bool(deadtime_result.candidate_costs),
@@ -487,6 +526,7 @@ class AdaptiveTPIAlgorithm:
         self,
         sample: CycleSample,
         *,
+        cycle_duration_min: float = 5.0,
         is_valid: bool,
         is_informative: bool,
         is_estimator_informative: bool,
@@ -494,6 +534,7 @@ class AdaptiveTPIAlgorithm:
         """Append one real cycle to the temporal history used by identification."""
         self._deadtime_model.record_cycle(
             self._make_deadtime_observation(sample),
+            cycle_duration_min=cycle_duration_min,
             is_valid=is_valid,
             is_informative=is_informative,
             is_estimator_informative=is_estimator_informative,

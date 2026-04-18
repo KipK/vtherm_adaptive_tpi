@@ -43,6 +43,7 @@ class CycleHistoryEntry:
     is_valid: bool
     is_informative: bool
     is_estimator_informative: bool
+    cycle_duration_min: float = 5.0
 
 
 @dataclass(slots=True)
@@ -148,6 +149,7 @@ class DeadtimeModel:
         self,
         observation: DeadtimeObservation,
         *,
+        cycle_duration_min: float = 5.0,
         is_valid: bool,
         is_informative: bool,
         is_estimator_informative: bool = False,
@@ -160,6 +162,7 @@ class DeadtimeModel:
                 tout=observation.tout,
                 target_temp=observation.target_temp,
                 applied_power=observation.applied_power,
+                cycle_duration_min=cycle_duration_min,
                 is_valid=is_valid,
                 is_informative=is_informative,
                 is_estimator_informative=is_estimator_informative,

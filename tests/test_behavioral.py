@@ -15,13 +15,17 @@ from custom_components.vtherm_adaptive_tpi.adaptive_tpi.deadtime import (
     DeadtimeObservation,
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.estimator import (
+    ASample,
     A_MAX,
     A_MIN,
+    BSample,
     B_MAX,
     B_MIN,
-    EstimatorSample,
     ParameterEstimator,
-    build_estimator_sample,
+)
+from custom_components.vtherm_adaptive_tpi.adaptive_tpi.learning_window import (
+    WINDOW_REGIME_OFF,
+    build_learning_window,
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.supervisor import (
     PHASE_A,
@@ -149,35 +153,44 @@ def test_deadtime_lock_failure_stays_explicit_before_enough_cycles() -> None:
 
 
 def test_estimator_updates_stay_bounded_under_extreme_samples() -> None:
-    """The constrained estimator should never leave its configured bounds."""
+    """The decoupled estimators should never leave their configured bounds."""
     estimator = ParameterEstimator()
-    positive_sample = EstimatorSample(
-        y=20.0,
-        u_del=50.0,
-        loss_input=50.0,
-        c_nd=1.0,
-        i_a=1.0,
-        i_b=1.0,
-        i_e=1.0,
-        i_global=1.0,
-    )
-    negative_sample = EstimatorSample(
-        y=-20.0,
-        u_del=50.0,
-        loss_input=50.0,
-        c_nd=1.0,
-        i_a=1.0,
-        i_b=1.0,
-        i_e=1.0,
-        i_global=1.0,
-    )
 
     for _ in range(50):
-        update = estimator.update(positive_sample)
-        assert update.updated is True
+        estimator.update_b(
+            BSample(
+                dTdt=-10.0,
+                delta_out=8.0,
+                setpoint_error=1.5,
+                u_eff=0.0,
+            )
+        )
+        update = estimator.update_a(
+            ASample(
+                dTdt=10.0,
+                delta_out=8.0,
+                setpoint_error=1.5,
+                u_eff=1.0,
+            )
+        )
 
     for _ in range(50):
-        update = estimator.update(negative_sample)
+        estimator.update_b(
+            BSample(
+                dTdt=10.0,
+                delta_out=8.0,
+                setpoint_error=1.5,
+                u_eff=0.0,
+            )
+        )
+        update = estimator.update_a(
+            ASample(
+                dTdt=-10.0,
+                delta_out=8.0,
+                setpoint_error=1.5,
+                u_eff=1.0,
+            )
+        )
         assert A_MIN <= update.a_hat <= A_MAX
         assert B_MIN <= update.b_hat <= B_MAX
         assert 0.0 <= update.c_a <= 1.0
@@ -211,54 +224,60 @@ def test_deadtime_search_keeps_real_cycle_alignment_across_noninformative_gaps()
     assert result.best_candidate == pytest.approx(1.0)
 
 
-def test_estimator_sample_uses_real_delayed_cycle_across_gaps() -> None:
-    """Estimator alignment must use the real delayed cycle, not the previous informative one."""
-    sample = build_estimator_sample(
+def test_learning_window_can_extend_across_multiple_off_cycles() -> None:
+    """A weak OFF cycle may be extended with the next one to produce a usable slope."""
+    result = build_learning_window(
         (
             CycleHistoryEntry(
                 tin=19.0,
-                tout=10.0,
-                target_temp=21.0,
-                applied_power=0.8,
-                is_valid=True,
-                is_informative=True,
-                is_estimator_informative=True,
-            ),
-            CycleHistoryEntry(
-                tin=19.1,
-                tout=10.0,
-                target_temp=21.0,
-                applied_power=0.2,
-                is_valid=False,
-                is_informative=False,
-                is_estimator_informative=False,
-            ),
-            CycleHistoryEntry(
-                tin=19.2,
-                tout=10.0,
-                target_temp=21.0,
-                applied_power=0.7,
-                is_valid=True,
-                is_informative=True,
-                is_estimator_informative=True,
-            ),
-            CycleHistoryEntry(
-                tin=19.45,
                 tout=10.0,
                 target_temp=21.0,
                 applied_power=0.0,
                 is_valid=True,
                 is_informative=False,
                 is_estimator_informative=True,
+                cycle_duration_min=5.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.1,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=5.0,
+            ),
+            CycleHistoryEntry(
+                tin=18.9,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=5.0,
+            ),
+            CycleHistoryEntry(
+                tin=18.75,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=5.0,
             ),
         ),
         nd_hat=1.0,
-        c_nd=0.7,
+        regime=WINDOW_REGIME_OFF,
     )
 
-    assert sample is not None
-    assert sample.u_del == pytest.approx(0.2)
-    assert sample.y == pytest.approx(0.25)
+    assert result.sample is not None
+    assert result.sample.cycle_count == 3
+    assert result.sample.points_count == 4
+    assert result.sample.u_eff == pytest.approx(0.0)
+    assert result.sample.total_duration_min == pytest.approx(15.0)
 
 
 def test_estimator_can_learn_b_on_zero_power_cycles() -> None:
@@ -267,22 +286,65 @@ def test_estimator_can_learn_b_on_zero_power_cycles() -> None:
     initial_a_hat = estimator.a_hat
     initial_b_hat = estimator.b_hat
 
-    update = estimator.update(
-        EstimatorSample(
-            y=-0.3,
-            u_del=0.0,
-            loss_input=-8.0,
-            c_nd=0.8,
-            i_a=0.0,
-            i_b=1.0,
-            i_e=1.0,
-            i_global=0.0,
+    update = estimator.update_b(
+        BSample(
+            dTdt=-0.06,
+            delta_out=8.0,
+            setpoint_error=1.0,
+            u_eff=0.0,
         )
     )
 
     assert update.updated is True
     assert update.a_hat == pytest.approx(initial_a_hat)
     assert update.b_hat > initial_b_hat
+    assert update.b_last_reason == "sample_accepted"
+
+
+def test_a_does_not_move_until_b_has_converged() -> None:
+    """The heating gain must stay frozen until the loss estimate is stable enough."""
+    estimator = ParameterEstimator()
+
+    update = estimator.update_a(
+        ASample(
+            dTdt=0.04,
+            delta_out=8.0,
+            setpoint_error=1.0,
+            u_eff=0.6,
+        )
+    )
+
+    assert update.updated is False
+    assert update.a_hat == pytest.approx(A_MIN)
+    assert update.a_last_reason == "a_waiting_b_converged"
+
+
+def test_a_starts_learning_after_b_stabilization() -> None:
+    """The heating gain may start learning once `b` has converged on OFF cycles."""
+    estimator = ParameterEstimator()
+
+    for _ in range(4):
+        estimator.update_b(
+            BSample(
+                dTdt=-0.08,
+                delta_out=8.0,
+                setpoint_error=1.0,
+                u_eff=0.0,
+            )
+        )
+
+    update = estimator.update_a(
+        ASample(
+            dTdt=0.05,
+            delta_out=8.0,
+            setpoint_error=1.0,
+            u_eff=0.6,
+        )
+    )
+
+    assert update.b_converged is True
+    assert update.updated is True
+    assert update.a_hat > A_MIN
 
 
 def test_non_informative_cycle_skips_estimator_update() -> None:
