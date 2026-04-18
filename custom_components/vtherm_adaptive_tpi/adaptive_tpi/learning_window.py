@@ -130,7 +130,9 @@ def build_learning_window(
     return LearningWindowResult(
         sample=LearningWindowSample(
             regime=regime,
-            dTdt=amplitude / total_duration_min,
+            # The adaptive model is cycle-discrete, so learning samples must keep
+            # a temperature delta per cycle rather than per minute.
+            dTdt=amplitude / max(1, cycle_count),
             u_eff=u_eff,
             delta_out=delta_out,
             setpoint_error=setpoint_error,

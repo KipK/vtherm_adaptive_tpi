@@ -278,6 +278,53 @@ def test_learning_window_can_extend_across_multiple_off_cycles() -> None:
     assert result.sample.points_count == 4
     assert result.sample.u_eff == pytest.approx(0.0)
     assert result.sample.total_duration_min == pytest.approx(15.0)
+    assert result.sample.dTdt == pytest.approx(-0.25 / 3.0)
+
+
+def test_learning_window_reports_dt_per_cycle_not_per_minute() -> None:
+    """The learning slope must stay in the discrete per-cycle units used by the controller."""
+    result = build_learning_window(
+        (
+            CycleHistoryEntry(
+                tin=20.0,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=5.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.85,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=5.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.7,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=5.0,
+            ),
+        ),
+        nd_hat=0.0,
+        regime=WINDOW_REGIME_OFF,
+    )
+
+    assert result.sample is not None
+    assert result.sample.amplitude == pytest.approx(-0.3)
+    assert result.sample.cycle_count == 2
+    assert result.sample.total_duration_min == pytest.approx(10.0)
+    assert result.sample.dTdt == pytest.approx(-0.15)
 
 
 def test_learning_window_ignores_recent_on_cycles_when_building_off_window() -> None:
