@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -33,6 +34,7 @@ class AdaptiveTPIHandler:
         """Initialize handler with parent thermostat reference."""
         self._thermostat = thermostat
         self._should_publish_intermediate = True
+        self._published_diagnostics: dict[str, Any] = {}
         storage_key = self._build_storage_key(thermostat.unique_id)
         self._storage_key = storage_key
         self._store: Store[dict[str, Any]] = Store(
@@ -54,6 +56,7 @@ class AdaptiveTPIHandler:
             max_on_percent=getattr(t, "max_on_percent", None),
             debug_mode=bool(entry.get(CONF_ADAPTIVE_TPI_DEBUG, False)),
         )
+        self._refresh_published_diagnostics()
 
         _LOGGER.info("%s - Adaptive TPI scaffold initialized", t)
 
@@ -214,15 +217,18 @@ class AdaptiveTPIHandler:
             power_shedding=t.is_overpowering_detected,
         )
         await self._async_save_persisted_state()
+        self._refresh_published_diagnostics()
+        t.update_custom_attributes()
+        t.async_write_ha_state()
 
     def update_attributes(self) -> None:
-        """Expose the current Adaptive TPI diagnostics on the thermostat."""
+        """Expose the last cycle-boundary Adaptive TPI diagnostics on the thermostat."""
         t = self._thermostat
         if t.prop_algorithm is None:
             return
 
         t._attr_extra_state_attributes["specific_states"].update({
-            "adaptive_tpi": t.prop_algorithm.get_diagnostics(),
+            "adaptive_tpi": copy.deepcopy(self._published_diagnostics),
         })
 
     def should_publish_intermediate(self) -> bool:
@@ -275,6 +281,7 @@ class AdaptiveTPIHandler:
             last_accepted_at=data.get("last_accepted_at"),
             saved_at=data.get("saved_at"),
         )
+        self._refresh_published_diagnostics()
 
     async def _async_save_persisted_state(self) -> None:
         """Save the minimal adaptive state required across reloads."""
@@ -308,10 +315,19 @@ class AdaptiveTPIHandler:
 
         t.prop_algorithm.reset_learning()
         await self._async_delete_persisted_state()
+        self._refresh_published_diagnostics()
         await t.async_control_heating(force=True)
         self.update_attributes()
         t.async_write_ha_state()
         _LOGGER.info("%s - Adaptive TPI learning state has been reset", t)
+
+    def _refresh_published_diagnostics(self) -> None:
+        """Snapshot diagnostics that stay stable until the next cycle boundary."""
+        t = self._thermostat
+        if t.prop_algorithm is None:
+            self._published_diagnostics = {}
+            return
+        self._published_diagnostics = copy.deepcopy(t.prop_algorithm.get_diagnostics())
 
     async def _async_delete_persisted_state(self) -> None:
         """Delete the persisted snapshot file for this thermostat, if present."""
