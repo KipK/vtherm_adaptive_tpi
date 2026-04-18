@@ -78,6 +78,8 @@ class AdaptiveTPIState:
     b_samples_count: int = 0
     a_last_reason: str | None = None
     b_last_reason: str | None = None
+    last_learning_attempt_reason: str | None = None
+    last_learning_attempt_regime: str | None = None
     a_dispersion: float = 0.0
     b_dispersion: float = 0.0
     on_percent: float = 0.0
@@ -91,6 +93,10 @@ class AdaptiveTPIState:
     last_freeze_reason: str | None = None
     hours_without_excitation: float = 0.0
     cycle_min_at_last_accepted_cycle: float | None = None
+    cycle_started_calls_count: int = 0
+    cycle_completed_calls_count: int = 0
+    last_cycle_started_at: str | None = None
+    last_cycle_completed_at: str | None = None
     deadtime_locked: bool = False
     deadtime_best_candidate: float | None = None
     deadtime_second_best_candidate: float | None = None
@@ -114,6 +120,8 @@ class AdaptiveTPIState:
             "b_samples_count": self.b_samples_count,
             "a_last_reason": self.a_last_reason,
             "b_last_reason": self.b_last_reason,
+            "last_learning_attempt_reason": self.last_learning_attempt_reason,
+            "last_learning_attempt_regime": self.last_learning_attempt_regime,
             "a_dispersion": self.a_dispersion,
             "b_dispersion": self.b_dispersion,
             "bootstrap_phase": self.bootstrap_phase,
@@ -123,6 +131,10 @@ class AdaptiveTPIState:
             "adaptive_cycles_since_phase_c": self.adaptive_cycles_since_phase_c,
             "hours_without_excitation": self.hours_without_excitation,
             "cycle_min_at_last_accepted_cycle": self.cycle_min_at_last_accepted_cycle,
+            "cycle_started_calls_count": self.cycle_started_calls_count,
+            "cycle_completed_calls_count": self.cycle_completed_calls_count,
+            "last_cycle_started_at": self.last_cycle_started_at,
+            "last_cycle_completed_at": self.last_cycle_completed_at,
             "deadtime_locked": self.deadtime_locked,
             "deadtime_best_candidate": self.deadtime_best_candidate,
             "deadtime_second_best_candidate": self.deadtime_second_best_candidate,
@@ -166,6 +178,8 @@ class AdaptiveTPIState:
             "adaptive_cycles_since_phase_c",
             "a_samples_count",
             "b_samples_count",
+            "cycle_started_calls_count",
+            "cycle_completed_calls_count",
         )
         for field_name in int_fields:
             value = _coerce_int(data.get(field_name))
@@ -188,6 +202,14 @@ class AdaptiveTPIState:
             self.a_last_reason = data["a_last_reason"]
         if isinstance(data.get("b_last_reason"), str):
             self.b_last_reason = data["b_last_reason"]
+        if isinstance(data.get("last_learning_attempt_reason"), str):
+            self.last_learning_attempt_reason = data["last_learning_attempt_reason"]
+        if isinstance(data.get("last_learning_attempt_regime"), str):
+            self.last_learning_attempt_regime = data["last_learning_attempt_regime"]
+        if isinstance(data.get("last_cycle_started_at"), str):
+            self.last_cycle_started_at = data["last_cycle_started_at"]
+        if isinstance(data.get("last_cycle_completed_at"), str):
+            self.last_cycle_completed_at = data["last_cycle_completed_at"]
 
     def reset_confidences(self) -> None:
         """Reset adaptive confidences and transient trust markers."""

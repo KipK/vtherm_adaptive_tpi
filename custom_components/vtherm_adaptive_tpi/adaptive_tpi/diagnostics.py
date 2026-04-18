@@ -27,6 +27,8 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
         "b_samples_count": state.b_samples_count,
         "a_last_reason": state.a_last_reason,
         "b_last_reason": state.b_last_reason,
+        "last_learning_attempt_reason": state.last_learning_attempt_reason,
+        "last_learning_attempt_regime": state.last_learning_attempt_regime,
         "a_dispersion": state.a_dispersion,
         "b_dispersion": state.b_dispersion,
         "deadtime_candidate_costs": state.deadtime_candidate_costs,
@@ -34,6 +36,10 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
         "accepted_cycles_count": state.accepted_cycles_count,
         "hours_without_excitation": state.hours_without_excitation,
         "cycle_min_at_last_accepted_cycle": state.cycle_min_at_last_accepted_cycle,
+        "cycle_started_calls_count": state.cycle_started_calls_count,
+        "cycle_completed_calls_count": state.cycle_completed_calls_count,
+        "last_cycle_started_at": state.last_cycle_started_at,
+        "last_cycle_completed_at": state.last_cycle_completed_at,
     }
     if debug_mode:
         data["debug"] = {

@@ -128,6 +128,8 @@ class AdaptiveTPIAlgorithm:
     ) -> None:
         """Capture the committed cycle start conditions from the scheduler."""
         del on_time_sec, off_time_sec
+        self._state.cycle_started_calls_count += 1
+        self._state.last_cycle_started_at = self._utc_now().isoformat()
         self.update_realized_power(on_percent)
         if target_temp is None or current_temp is None or ext_current_temp is None:
             self._pending_cycle_sample = None
@@ -155,6 +157,8 @@ class AdaptiveTPIAlgorithm:
         **_kwargs,
     ) -> None:
         """Consume one completed master cycle for adaptive learning."""
+        self._state.cycle_completed_calls_count += 1
+        self._state.last_cycle_completed_at = self._utc_now().isoformat()
         pending_cycle = self._pending_cycle_sample
         self._pending_cycle_sample = None
 
@@ -162,10 +166,14 @@ class AdaptiveTPIAlgorithm:
             self.update_realized_power(e_eff)
 
         if pending_cycle is None:
+            self._state.last_learning_attempt_reason = "missing_cycle_context"
+            self._state.last_learning_attempt_regime = None
             self.reject_cycle("missing_cycle_context")
             return
 
         if elapsed_ratio < 1.0:
+            self._state.last_learning_attempt_reason = "cycle_interrupted"
+            self._state.last_learning_attempt_regime = None
             self._record_cycle_history(
                 pending_cycle,
                 cycle_duration_min=cycle_duration_min or 5.0,
@@ -185,6 +193,8 @@ class AdaptiveTPIAlgorithm:
         )
         self._supervisor.apply_to_state(self._state)
         if decision.classification != "accepted":
+            self._state.last_learning_attempt_reason = decision.reason
+            self._state.last_learning_attempt_regime = None
             self._record_cycle_history(
                 pending_cycle,
                 cycle_duration_min=cycle_duration_min or 5.0,
@@ -204,6 +214,8 @@ class AdaptiveTPIAlgorithm:
         estimator_informative = self._is_estimator_informative_cycle(pending_cycle)
 
         if not deadtime_informative and not estimator_informative:
+            self._state.last_learning_attempt_reason = "non_informative_cycle"
+            self._state.last_learning_attempt_regime = None
             self._record_cycle_history(
                 pending_cycle,
                 cycle_duration_min=cycle_duration_min or 5.0,
@@ -259,6 +271,8 @@ class AdaptiveTPIAlgorithm:
             off_window.sample is not None
             and self._supervisor.allow_b_update()
         ):
+            self._state.last_learning_attempt_regime = "b"
+            self._state.last_learning_attempt_reason = off_window.reason
             estimator_update = self._estimator.update_b(
                 BSample(
                     dTdt=off_window.sample.dTdt,
@@ -273,6 +287,8 @@ class AdaptiveTPIAlgorithm:
             c_nd=deadtime_result.c_nd,
             b_converged=self._state.b_converged,
         ):
+            self._state.last_learning_attempt_regime = "a"
+            self._state.last_learning_attempt_reason = on_window.reason
             estimator_update = self._estimator.update_a(
                 ASample(
                     dTdt=on_window.sample.dTdt,
@@ -283,6 +299,14 @@ class AdaptiveTPIAlgorithm:
                 reason=on_window.reason,
             )
         else:
+            self._state.last_learning_attempt_regime = (
+                "b" if off_window.sample is not None else "a" if on_window.sample is not None else None
+            )
+            self._state.last_learning_attempt_reason = (
+                self._supervisor.last_freeze_reason
+                or off_window.reason
+                or on_window.reason
+            )
             self._state.a_last_reason = self._supervisor.last_freeze_reason or on_window.reason
             self._state.b_last_reason = off_window.reason
 
@@ -300,8 +324,15 @@ class AdaptiveTPIAlgorithm:
             self._state.b_last_reason = estimator_update.b_last_reason
             self._state.a_dispersion = estimator_update.a_dispersion
             self._state.b_dispersion = estimator_update.b_dispersion
+            self._state.last_learning_attempt_reason = (
+                estimator_update.b_last_reason
+                if estimator_update.b_updated
+                else estimator_update.a_last_reason
+            )
             estimator_updated = estimator_update.updated
         elif off_window.sample is None and on_window.sample is None:
+            self._state.last_learning_attempt_reason = off_window.reason
+            self._state.last_learning_attempt_regime = None
             self._supervisor.finalize_non_informative_cycle()
         self._supervisor.update_phase_progression(
             self._state,
