@@ -25,6 +25,35 @@ _LOGGER = logging.getLogger(__name__)
 _STORAGE_KEY_PREFIX = f"{DOMAIN}.state"
 
 
+def _calculate_cycle_times(
+    on_percent: float,
+    cycle_min: int,
+    minimal_activation_delay: int | None = 0,
+    minimal_deactivation_delay: int | None = 0,
+) -> tuple[int, int, bool]:
+    """Convert an on_percent command into concrete cycle timings."""
+    min_on = minimal_activation_delay if minimal_activation_delay is not None else 0
+    min_off = minimal_deactivation_delay if minimal_deactivation_delay is not None else 0
+
+    on_percent = max(0.0, min(1.0, on_percent))
+
+    cycle_sec = cycle_min * 60
+    on_time_sec = on_percent * cycle_sec
+    forced_by_timing = False
+
+    if on_time_sec > 0 and on_time_sec < min_on:
+        on_time_sec = 0
+        forced_by_timing = True
+
+    off_time_sec = cycle_sec - on_time_sec
+    if on_time_sec < cycle_sec and off_time_sec < min_off:
+        on_time_sec = cycle_sec
+        off_time_sec = 0
+        forced_by_timing = True
+
+    return int(on_time_sec), int(off_time_sec), forced_by_timing
+
+
 class AdaptiveTPIHandler:
     """Handler for Adaptive TPI-specific runtime logic."""
 
@@ -109,7 +138,7 @@ class AdaptiveTPIHandler:
                 t.current_outdoor_temperature,
                 t.last_temperature_slope,
                 t.vtherm_hvac_mode,
-                power_shedding=t.power_manager.is_overpowering_detected,
+                power_shedding=t.is_overpowering_detected,
                 off_reason=t.hvac_off_reason,
                 cycle_min=t.cycle_min,
             )
@@ -126,6 +155,13 @@ class AdaptiveTPIHandler:
         if t.prop_algorithm is None:
             return
 
+        if t.cycle_scheduler is None:
+            _LOGGER.warning(
+                "%s - Adaptive TPI scheduler is unavailable. Skipping cycle control.",
+                t,
+            )
+            return
+
         on_percent = t.on_percent
         if on_percent is None:
             if hasattr(t.prop_algorithm, "reject_cycle"):
@@ -135,6 +171,17 @@ class AdaptiveTPIHandler:
                 t,
             )
             return
+
+        on_time_sec, off_time_sec, forced_by_timing = _calculate_cycle_times(
+            on_percent,
+            t.cycle_min,
+            t.minimal_activation_delay,
+            t.minimal_deactivation_delay,
+        )
+        realized_percent = on_time_sec / (t.cycle_min * 60)
+
+        if forced_by_timing and hasattr(t.prop_algorithm, "update_realized_power"):
+            t.prop_algorithm.update_realized_power(realized_percent)
 
         await t.cycle_scheduler.start_cycle(
             t.vtherm_hvac_mode,
@@ -147,7 +194,11 @@ class AdaptiveTPIHandler:
 
     def on_scheduler_ready(self, scheduler) -> None:
         """Bind the handler to the cycle scheduler."""
-        del scheduler
+        if scheduler is None:
+            _LOGGER.warning(
+                "%s - Adaptive TPI received a null scheduler binding",
+                self._thermostat,
+            )
 
     def update_attributes(self) -> None:
         """Expose the current Adaptive TPI diagnostics on the thermostat."""
