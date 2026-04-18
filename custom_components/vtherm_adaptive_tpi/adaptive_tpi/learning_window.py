@@ -16,6 +16,7 @@ MIN_WINDOW_AMPLITUDE = 0.08
 MIN_WINDOW_DURATION_MIN = 8.0
 MAX_WINDOW_CYCLES = 3
 MAX_WINDOW_DURATION_MIN = 45.0
+MAX_SETPOINT_JUMP = 0.3
 
 
 @dataclass(slots=True)
@@ -56,18 +57,11 @@ def build_learning_window(
             waiting_next_cycle=False,
         )
 
-    candidate = _find_latest_candidate(observations)
-    if candidate is None:
+    end_index = _find_latest_candidate_end(observations, regime=regime)
+    if end_index is None:
         return LearningWindowResult(
             sample=None,
-            reason="window_no_candidate",
-            waiting_next_cycle=False,
-        )
-    end_index, detected_regime = candidate
-    if detected_regime != regime:
-        return LearningWindowResult(
-            sample=None,
-            reason=f"{regime}_window_inactive",
+            reason=f"{regime}_window_no_candidate",
             waiting_next_cycle=False,
         )
 
@@ -78,6 +72,12 @@ def build_learning_window(
         previous = observations[start_index - 1]
         if not previous.is_estimator_informative or not _matches_regime(previous, regime):
             break
+        if _has_setpoint_jump(previous, observations[start_index]):
+            return LearningWindowResult(
+                sample=None,
+                reason=f"{regime}_window_setpoint_changed",
+                waiting_next_cycle=False,
+            )
         next_duration = total_duration_min + _duration_minutes(previous)
         if next_duration > MAX_WINDOW_DURATION_MIN:
             break
@@ -85,7 +85,13 @@ def build_learning_window(
         total_duration_min = next_duration
         cycle_count += 1
 
-    end_observation = observations[end_index + 1]
+    if _has_setpoint_jump(observations[end_index], end_observation := observations[end_index + 1]):
+        return LearningWindowResult(
+            sample=None,
+            reason=f"{regime}_window_setpoint_changed",
+            waiting_next_cycle=False,
+        )
+
     start_observation = observations[start_index]
     amplitude = end_observation.tin - start_observation.tin
     if (
@@ -138,18 +144,18 @@ def build_learning_window(
     )
 
 
-def _find_latest_candidate(
+def _find_latest_candidate_end(
     observations: tuple[CycleHistoryEntry, ...],
-) -> tuple[int, str] | None:
+    *,
+    regime: str,
+) -> int | None:
     for candidate_index in range(len(observations) - 2, -1, -1):
         current = observations[candidate_index]
         nxt = observations[candidate_index + 1]
         if not current.is_estimator_informative or not nxt.is_valid:
             continue
-        if current.applied_power <= OFF_POWER_MAX:
-            return candidate_index, WINDOW_REGIME_OFF
-        if current.applied_power >= ON_POWER_MIN:
-            return candidate_index, WINDOW_REGIME_ON
+        if _matches_regime(current, regime):
+            return candidate_index
     return None
 
 
@@ -163,3 +169,7 @@ def _matches_regime(entry: CycleHistoryEntry, regime: str) -> bool:
 
 def _duration_minutes(entry: CycleHistoryEntry) -> float:
     return max(0.0, float(entry.cycle_duration_min))
+
+
+def _has_setpoint_jump(left: CycleHistoryEntry, right: CycleHistoryEntry) -> bool:
+    return abs(left.target_temp - right.target_temp) > MAX_SETPOINT_JUMP

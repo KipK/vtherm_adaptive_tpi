@@ -280,6 +280,103 @@ def test_learning_window_can_extend_across_multiple_off_cycles() -> None:
     assert result.sample.total_duration_min == pytest.approx(15.0)
 
 
+def test_learning_window_ignores_recent_on_cycles_when_building_off_window() -> None:
+    """OFF learning must search its own latest candidate instead of following the latest ON regime."""
+    result = build_learning_window(
+        (
+            CycleHistoryEntry(
+                tin=20.0,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.7,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.4,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.6,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.55,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.6,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+        ),
+        nd_hat=1.0,
+        regime=WINDOW_REGIME_OFF,
+    )
+
+    assert result.sample is not None
+    assert result.reason == "off_window_ready"
+    assert result.sample.cycle_count == 2
+
+
+def test_learning_window_rejects_setpoint_jump() -> None:
+    """A strong target change must invalidate the window to avoid mixing regimes."""
+    result = build_learning_window(
+        (
+            CycleHistoryEntry(
+                tin=20.0,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.7,
+                tout=10.0,
+                target_temp=20.4,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.45,
+                tout=10.0,
+                target_temp=20.4,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+        ),
+        nd_hat=1.0,
+        regime=WINDOW_REGIME_OFF,
+    )
+
+    assert result.sample is None
+    assert result.reason == "off_window_setpoint_changed"
+
+
 def test_estimator_can_learn_b_on_zero_power_cycles() -> None:
     """Cooling-only informative cycles should update `b_hat` without moving `a_hat`."""
     estimator = ParameterEstimator()
