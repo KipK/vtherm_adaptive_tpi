@@ -192,6 +192,24 @@ def test_non_informative_cycle_skips_estimator_update() -> None:
             hvac_mode="heat",
             cycle_min=5.0,
         )
+        algo.on_cycle_started(
+            on_time_sec=0.0,
+            off_time_sec=300.0,
+            on_percent=0.0,
+            hvac_mode="heat",
+            target_temp=20.0,
+            current_temp=19.95,
+            ext_current_temp=19.5,
+        )
+        algo.on_cycle_completed(
+            e_eff=0.0,
+            elapsed_ratio=1.0,
+            cycle_duration_min=5.0,
+            target_temp=20.0,
+            current_temp=19.95,
+            ext_current_temp=19.5,
+            hvac_mode="heat",
+        )
 
     diagnostics = algo.get_diagnostics()
     assert diagnostics["last_freeze_reason"] == "non_informative_cycle"
@@ -208,6 +226,25 @@ def test_disturbed_cycle_freezes_adaptation() -> None:
         current_temp=20.0,
         ext_current_temp=8.0,
         slope=None,
+        hvac_mode="heat",
+        power_shedding=True,
+    )
+    algo.on_cycle_started(
+        on_time_sec=180.0,
+        off_time_sec=120.0,
+        on_percent=0.6,
+        hvac_mode="heat",
+        target_temp=21.0,
+        current_temp=20.0,
+        ext_current_temp=8.0,
+    )
+    algo.on_cycle_completed(
+        e_eff=0.6,
+        elapsed_ratio=1.0,
+        cycle_duration_min=5.0,
+        target_temp=21.0,
+        current_temp=20.0,
+        ext_current_temp=8.0,
         hvac_mode="heat",
         power_shedding=True,
     )

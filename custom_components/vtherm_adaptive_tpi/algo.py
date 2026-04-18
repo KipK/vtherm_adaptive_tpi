@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .adaptive_tpi.controller import compute_on_percent, project_gains
@@ -17,6 +18,17 @@ from .const import DEFAULT_KEXT, DEFAULT_KINT
 _LOGGER = logging.getLogger(__name__)
 _CONFIDENCE_DECAY_30_DAYS = 30
 _CONFIDENCE_DECAY_90_DAYS = 90
+
+
+@dataclass(slots=True)
+class CycleSample:
+    """One committed master cycle captured at the scheduler boundary."""
+
+    target_temp: float
+    current_temp: float
+    outdoor_temp: float
+    applied_power: float
+    hvac_mode: Any
 
 
 class AdaptiveTPIAlgorithm:
@@ -43,6 +55,7 @@ class AdaptiveTPIAlgorithm:
         self._state.b_hat = self._estimator.b_hat
         self._last_accepted_at: datetime | None = None
         self._temperature_available = False
+        self._pending_cycle_sample: CycleSample | None = None
 
     def calculate(
         self,
@@ -69,64 +82,6 @@ class AdaptiveTPIAlgorithm:
             setpoint_transition_active=bool(kwargs.get("setpoint_transition_active", False)),
         )
         self._supervisor.apply_to_state(self._state)
-
-        if decision.classification == "accepted" and ext_current_temp is not None and target_temp is not None and current_temp is not None:
-            self._last_accepted_at = datetime.now(timezone.utc)
-            self._state.valid_cycles_count += 1
-            deadtime_result = self._deadtime_model.record_accepted_observation(
-                DeadtimeObservation(
-                    tin=current_temp,
-                    tout=ext_current_temp,
-                    target_temp=target_temp,
-                    applied_power=self._state.on_percent,
-                )
-            )
-            self._state.accepted_cycles_count = self._deadtime_model.accepted_cycle_count
-            self._state.nd_hat = deadtime_result.nd_hat
-            self._state.c_nd = deadtime_result.c_nd
-            self._state.deadtime_locked = deadtime_result.locked
-            self._state.deadtime_best_candidate = deadtime_result.best_candidate
-            self._state.deadtime_second_best_candidate = deadtime_result.second_best_candidate
-            self._state.deadtime_candidate_costs = deadtime_result.candidate_costs
-            if deadtime_result.candidate_costs:
-                self._state.informative_deadtime_cycles_count += 1
-            cycle_min = kwargs.get("cycle_min")
-            if isinstance(cycle_min, (int, float)):
-                self._state.cycle_min_at_last_accepted_cycle = float(cycle_min)
-            self._supervisor.apply_deadtime_result(
-                locked=deadtime_result.locked,
-                confidence=deadtime_result.c_nd,
-                lock_reason=deadtime_result.lock_reason,
-            )
-            estimator_sample = build_estimator_sample(
-                self._deadtime_model.accepted_observations,
-                nd_hat=self._state.nd_hat,
-                c_nd=self._state.c_nd,
-            )
-            estimator_updated = False
-            if estimator_sample is not None:
-                self._state.i_a = estimator_sample.i_a
-                self._state.i_b = estimator_sample.i_b
-            if estimator_sample is not None and estimator_sample.i_global <= 0.0:
-                self._supervisor.finalize_non_informative_cycle()
-            elif self._supervisor.allow_estimator_update(
-                deadtime_locked=deadtime_result.locked,
-                c_nd=deadtime_result.c_nd,
-            ):
-                estimator_update = self._estimator.update(estimator_sample)
-                self._state.a_hat = estimator_update.a_hat
-                self._state.b_hat = estimator_update.b_hat
-                self._state.c_a = estimator_update.c_a
-                self._state.c_b = estimator_update.c_b
-                self._state.i_a = estimator_update.i_a
-                self._state.i_b = estimator_update.i_b
-                estimator_updated = estimator_update.updated
-            self._supervisor.update_phase_progression(
-                self._state,
-                deadtime_costs_available=bool(deadtime_result.candidate_costs),
-                estimator_updated=estimator_updated,
-            )
-            self._supervisor.apply_to_state(self._state)
 
         if target_temp is None or current_temp is None:
             self._state.calculated_on_percent = 0.0
@@ -156,6 +111,127 @@ class AdaptiveTPIAlgorithm:
     def update_realized_power(self, power_percent: float) -> None:
         """Record the power effectively applied after scheduler constraints."""
         self._state.on_percent = max(0.0, min(1.0, power_percent))
+
+    def on_cycle_started(
+        self,
+        *,
+        on_time_sec: float,
+        off_time_sec: float,
+        on_percent: float,
+        hvac_mode,
+        target_temp: float | None,
+        current_temp: float | None,
+        ext_current_temp: float | None,
+    ) -> None:
+        """Capture the committed cycle start conditions from the scheduler."""
+        del on_time_sec, off_time_sec
+        self.update_realized_power(on_percent)
+        if target_temp is None or current_temp is None or ext_current_temp is None:
+            self._pending_cycle_sample = None
+            return
+
+        self._pending_cycle_sample = CycleSample(
+            target_temp=target_temp,
+            current_temp=current_temp,
+            outdoor_temp=ext_current_temp,
+            applied_power=self._state.on_percent,
+            hvac_mode=hvac_mode,
+        )
+
+    def on_cycle_completed(
+        self,
+        *,
+        e_eff: float | None = None,
+        elapsed_ratio: float = 1.0,
+        cycle_duration_min: float | None = None,
+        target_temp: float | None,
+        current_temp: float | None,
+        ext_current_temp: float | None,
+        hvac_mode,
+        power_shedding: bool = False,
+        **_kwargs,
+    ) -> None:
+        """Consume one completed master cycle for adaptive learning."""
+        pending_cycle = self._pending_cycle_sample
+        self._pending_cycle_sample = None
+
+        if e_eff is not None:
+            self.update_realized_power(e_eff)
+
+        if pending_cycle is None:
+            self.reject_cycle("missing_cycle_context")
+            return
+
+        if elapsed_ratio < 1.0:
+            self.reject_cycle("cycle_interrupted")
+            return
+
+        decision = self._supervisor.evaluate_runtime_conditions(
+            target_temp=target_temp,
+            current_temp=current_temp,
+            outdoor_temp=ext_current_temp,
+            hvac_mode=hvac_mode,
+            power_shedding=power_shedding,
+        )
+        self._supervisor.apply_to_state(self._state)
+        if decision.classification != "accepted":
+            return
+
+        self._last_accepted_at = self._utc_now()
+        self._state.valid_cycles_count += 1
+        deadtime_result = self._deadtime_model.record_accepted_observation(
+            DeadtimeObservation(
+                tin=pending_cycle.current_temp,
+                tout=pending_cycle.outdoor_temp,
+                target_temp=pending_cycle.target_temp,
+                applied_power=self._state.on_percent,
+            )
+        )
+        self._state.accepted_cycles_count = self._deadtime_model.accepted_cycle_count
+        self._state.nd_hat = deadtime_result.nd_hat
+        self._state.c_nd = deadtime_result.c_nd
+        self._state.deadtime_locked = deadtime_result.locked
+        self._state.deadtime_best_candidate = deadtime_result.best_candidate
+        self._state.deadtime_second_best_candidate = deadtime_result.second_best_candidate
+        self._state.deadtime_candidate_costs = deadtime_result.candidate_costs
+        if deadtime_result.candidate_costs:
+            self._state.informative_deadtime_cycles_count += 1
+        if isinstance(cycle_duration_min, (int, float)):
+            self._state.cycle_min_at_last_accepted_cycle = float(cycle_duration_min)
+        self._supervisor.apply_deadtime_result(
+            locked=deadtime_result.locked,
+            confidence=deadtime_result.c_nd,
+            lock_reason=deadtime_result.lock_reason,
+        )
+        estimator_sample = build_estimator_sample(
+            self._deadtime_model.accepted_observations,
+            nd_hat=self._state.nd_hat,
+            c_nd=self._state.c_nd,
+        )
+        estimator_updated = False
+        if estimator_sample is not None:
+            self._state.i_a = estimator_sample.i_a
+            self._state.i_b = estimator_sample.i_b
+        if estimator_sample is not None and estimator_sample.i_global <= 0.0:
+            self._supervisor.finalize_non_informative_cycle()
+        elif self._supervisor.allow_estimator_update(
+            deadtime_locked=deadtime_result.locked,
+            c_nd=deadtime_result.c_nd,
+        ):
+            estimator_update = self._estimator.update(estimator_sample)
+            self._state.a_hat = estimator_update.a_hat
+            self._state.b_hat = estimator_update.b_hat
+            self._state.c_a = estimator_update.c_a
+            self._state.c_b = estimator_update.c_b
+            self._state.i_a = estimator_update.i_a
+            self._state.i_b = estimator_update.i_b
+            estimator_updated = estimator_update.updated
+        self._supervisor.update_phase_progression(
+            self._state,
+            deadtime_costs_available=bool(deadtime_result.candidate_costs),
+            estimator_updated=estimator_updated,
+        )
+        self._supervisor.apply_to_state(self._state)
 
     def save_state(self) -> dict:
         """Return a persistable algorithm snapshot."""

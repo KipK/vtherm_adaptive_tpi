@@ -25,35 +25,6 @@ _LOGGER = logging.getLogger(__name__)
 _STORAGE_KEY_PREFIX = f"{DOMAIN}.state"
 
 
-def _calculate_cycle_times(
-    on_percent: float,
-    cycle_min: int,
-    minimal_activation_delay: int | None = 0,
-    minimal_deactivation_delay: int | None = 0,
-) -> tuple[int, int, bool]:
-    """Convert an on_percent command into concrete cycle timings."""
-    min_on = minimal_activation_delay if minimal_activation_delay is not None else 0
-    min_off = minimal_deactivation_delay if minimal_deactivation_delay is not None else 0
-
-    on_percent = max(0.0, min(1.0, on_percent))
-
-    cycle_sec = cycle_min * 60
-    on_time_sec = on_percent * cycle_sec
-    forced_by_timing = False
-
-    if on_time_sec > 0 and on_time_sec < min_on:
-        on_time_sec = 0
-        forced_by_timing = True
-
-    off_time_sec = cycle_sec - on_time_sec
-    if on_time_sec < cycle_sec and off_time_sec < min_off:
-        on_time_sec = cycle_sec
-        off_time_sec = 0
-        forced_by_timing = True
-
-    return int(on_time_sec), int(off_time_sec), forced_by_timing
-
-
 class AdaptiveTPIHandler:
     """Handler for Adaptive TPI-specific runtime logic."""
 
@@ -172,17 +143,6 @@ class AdaptiveTPIHandler:
             )
             return
 
-        on_time_sec, off_time_sec, forced_by_timing = _calculate_cycle_times(
-            on_percent,
-            t.cycle_min,
-            t.minimal_activation_delay,
-            t.minimal_deactivation_delay,
-        )
-        realized_percent = on_time_sec / (t.cycle_min * 60)
-
-        if forced_by_timing and hasattr(t.prop_algorithm, "update_realized_power"):
-            t.prop_algorithm.update_realized_power(realized_percent)
-
         await t.cycle_scheduler.start_cycle(
             t.vtherm_hvac_mode,
             on_percent,
@@ -199,6 +159,58 @@ class AdaptiveTPIHandler:
                 "%s - Adaptive TPI received a null scheduler binding",
                 self._thermostat,
             )
+            return
+
+        scheduler.register_cycle_start_callback(self._on_cycle_started)
+        scheduler.register_cycle_end_callback(self._on_cycle_completed)
+
+    async def _on_cycle_started(
+        self,
+        *,
+        on_time_sec: float,
+        off_time_sec: float,
+        on_percent: float,
+        hvac_mode,
+    ) -> None:
+        """Forward the committed cycle start to the adaptive algorithm."""
+        t = self._thermostat
+        if t.prop_algorithm is None or not hasattr(t.prop_algorithm, "on_cycle_started"):
+            return
+
+        t.prop_algorithm.on_cycle_started(
+            on_time_sec=on_time_sec,
+            off_time_sec=off_time_sec,
+            on_percent=on_percent,
+            hvac_mode=hvac_mode,
+            target_temp=t.target_temperature,
+            current_temp=t.current_temperature,
+            ext_current_temp=t.current_outdoor_temperature,
+        )
+
+    async def _on_cycle_completed(
+        self,
+        *,
+        e_eff: float | None = None,
+        elapsed_ratio: float = 1.0,
+        cycle_duration_min: float | None = None,
+        **kwargs,
+    ) -> None:
+        """Forward the completed cycle boundary to the adaptive algorithm."""
+        del kwargs
+        t = self._thermostat
+        if t.prop_algorithm is None or not hasattr(t.prop_algorithm, "on_cycle_completed"):
+            return
+
+        t.prop_algorithm.on_cycle_completed(
+            e_eff=e_eff,
+            elapsed_ratio=elapsed_ratio,
+            cycle_duration_min=cycle_duration_min,
+            target_temp=t.target_temperature,
+            current_temp=t.current_temperature,
+            ext_current_temp=t.current_outdoor_temperature,
+            hvac_mode=t.vtherm_hvac_mode,
+            power_shedding=t.is_overpowering_detected,
+        )
 
     def update_attributes(self) -> None:
         """Expose the current Adaptive TPI diagnostics on the thermostat."""
