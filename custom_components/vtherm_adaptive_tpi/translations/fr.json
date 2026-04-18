@@ -1,20 +1,46 @@
 {
+  "title": "Versatile Thermostat Adaptive TPI",
   "config": {
     "step": {
       "user": {
-        "title": "Adaptive TPI",
-        "description": "Cree une entree plugin Adaptive TPI.",
+        "title": "Configuration Adaptive TPI",
+        "menu_options": {
+          "thermostat": "Configurer un thermostat",
+          "global": "Configurer les valeurs par défaut"
+        }
+      },
+      "global": {
+        "title": "Paramètres Adaptive TPI",
         "data": {
-          "target_vtherm_unique_id": "Unique id du VTherm cible",
-          "minimal_activation_delay": "Delai minimal d'activation",
-          "minimal_deactivation_delay": "Delai minimal de desactivation",
-          "adaptive_tpi_debug": "Activer le mode debug"
+          "minimal_activation_delay": "Délai minimal d'activation",
+          "minimal_deactivation_delay": "Délai minimal de désactivation",
+          "adaptive_tpi_debug": "Mode debug"
+        }
+      },
+      "thermostat": {
+        "title": "Adaptive TPI par thermostat",
+        "data": {
+          "target_vtherm_unique_id": "Thermostat cible",
+          "minimal_activation_delay": "Délai minimal d'activation",
+          "minimal_deactivation_delay": "Délai minimal de désactivation",
+          "adaptive_tpi_debug": "Mode debug"
         }
       }
     },
     "abort": {
-      "already_configured": "Cette entree Adaptive TPI est deja configuree."
+      "already_configured": "Cette entrée Adaptive TPI est déjà configurée."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Paramètres Adaptive TPI",
+        "data": {
+          "minimal_activation_delay": "Délai minimal d'activation",
+          "minimal_deactivation_delay": "Délai minimal de désactivation",
+          "adaptive_tpi_debug": "Mode debug"
+        }
+      }
     }
   }
 }
-

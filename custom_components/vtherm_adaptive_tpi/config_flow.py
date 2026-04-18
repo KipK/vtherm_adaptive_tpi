@@ -1,71 +1,146 @@
-"""Config flow for the vtherm_adaptive_tpi integration."""
+"""Config flow for vtherm_adaptive_tpi."""
 
 from __future__ import annotations
 
+from typing import Any
+
 import voluptuous as vol
-from homeassistant import config_entries
+from homeassistant.components.climate import DOMAIN as CLIMATE_DOMAIN
+from homeassistant.config_entries import ConfigFlow, OptionsFlow
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import selector
 
 from .const import (
     CONF_ADAPTIVE_TPI_DEBUG,
     CONF_MINIMAL_ACTIVATION_DELAY,
     CONF_MINIMAL_DEACTIVATION_DELAY,
     CONF_TARGET_VTHERM,
-    DEFAULT_ADAPTIVE_TPI_DEBUG,
-    DEFAULT_MINIMAL_ACTIVATION_DELAY,
-    DEFAULT_MINIMAL_DEACTIVATION_DELAY,
+    DEFAULT_OPTIONS,
     DOMAIN,
 )
 
 
-def _build_schema(defaults: dict | None = None) -> vol.Schema:
-    """Build the config form schema."""
-    defaults = defaults or {}
+def build_options_schema(defaults: dict[str, Any]) -> vol.Schema:
+    """Build the Adaptive TPI defaults schema."""
     return vol.Schema(
         {
             vol.Optional(
-                CONF_TARGET_VTHERM,
-                default=defaults.get(CONF_TARGET_VTHERM, ""),
-            ): str,
-            vol.Optional(
                 CONF_MINIMAL_ACTIVATION_DELAY,
-                default=defaults.get(
-                    CONF_MINIMAL_ACTIVATION_DELAY,
-                    DEFAULT_MINIMAL_ACTIVATION_DELAY,
-                ),
-            ): vol.Coerce(int),
+                default=defaults[CONF_MINIMAL_ACTIVATION_DELAY],
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0,
+                    max=3600,
+                    step=1,
+                    mode=selector.NumberSelectorMode.BOX,
+                    unit_of_measurement="s",
+                )
+            ),
             vol.Optional(
                 CONF_MINIMAL_DEACTIVATION_DELAY,
-                default=defaults.get(
-                    CONF_MINIMAL_DEACTIVATION_DELAY,
-                    DEFAULT_MINIMAL_DEACTIVATION_DELAY,
-                ),
-            ): vol.Coerce(int),
+                default=defaults[CONF_MINIMAL_DEACTIVATION_DELAY],
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0,
+                    max=3600,
+                    step=1,
+                    mode=selector.NumberSelectorMode.BOX,
+                    unit_of_measurement="s",
+                )
+            ),
             vol.Optional(
                 CONF_ADAPTIVE_TPI_DEBUG,
-                default=defaults.get(
-                    CONF_ADAPTIVE_TPI_DEBUG,
-                    DEFAULT_ADAPTIVE_TPI_DEBUG,
-                ),
+                default=defaults[CONF_ADAPTIVE_TPI_DEBUG],
             ): bool,
         }
     )
 
 
-class AdaptiveTPIConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for vtherm_adaptive_tpi."""
+def build_user_schema(defaults: dict[str, Any]) -> vol.Schema:
+    """Build the Adaptive TPI per-thermostat schema."""
+    schema = {
+        vol.Required(CONF_TARGET_VTHERM): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain=CLIMATE_DOMAIN)
+        )
+    }
+    schema.update(build_options_schema(defaults).schema)
+    return vol.Schema(schema)
+
+
+class AdaptiveTPIConfigFlow(ConfigFlow, domain=DOMAIN):
+    """Create Adaptive TPI plugin entries."""
 
     VERSION = 1
 
-    async def async_step_user(self, user_input=None):
-        """Handle the initial step."""
-        if user_input is None:
-            return self.async_show_form(step_id="user", data_schema=_build_schema())
+    async def async_step_user(self, user_input: dict[str, Any] | None = None):
+        """Show the configuration scope menu."""
+        return self.async_show_menu(
+            step_id="user",
+            menu_options=["thermostat", "global"],
+        )
 
-        target_vtherm = user_input.get(CONF_TARGET_VTHERM, "").strip()
-        unique_id = target_vtherm or DOMAIN
-        await self.async_set_unique_id(unique_id)
+    async def async_step_global(self, user_input: dict[str, Any] | None = None):
+        """Handle the global defaults entry."""
+        await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
 
-        title = f"Adaptive TPI - {target_vtherm}" if target_vtherm else "Adaptive TPI"
-        return self.async_create_entry(title=title, data=user_input)
+        if user_input is not None:
+            return self.async_create_entry(title="Adaptive TPI defaults", data=user_input)
 
+        return self.async_show_form(
+            step_id="global",
+            data_schema=build_options_schema(DEFAULT_OPTIONS),
+        )
+
+    async def async_step_thermostat(self, user_input: dict[str, Any] | None = None):
+        """Handle the per-thermostat entry."""
+        if user_input is not None:
+            entity_id = user_input.get(CONF_TARGET_VTHERM)
+            registry = er.async_get(self.hass)
+            reg_entry = registry.async_get(entity_id)
+            if reg_entry is None or reg_entry.unique_id is None:
+                return self.async_show_form(
+                    step_id="thermostat",
+                    data_schema=build_user_schema(DEFAULT_OPTIONS),
+                    errors={CONF_TARGET_VTHERM: "invalid_entity"},
+                )
+
+            target_unique_id = reg_entry.unique_id
+            await self.async_set_unique_id(f"{DOMAIN}-{target_unique_id}")
+            self._abort_if_unique_id_configured()
+
+            data = dict(user_input)
+            data[CONF_TARGET_VTHERM] = target_unique_id
+            state = self.hass.states.get(entity_id)
+            title = state.name if state is not None else entity_id
+            return self.async_create_entry(title=title, data=data)
+
+        return self.async_show_form(
+            step_id="thermostat",
+            data_schema=build_user_schema(DEFAULT_OPTIONS),
+        )
+
+    @staticmethod
+    def async_get_options_flow(config_entry):
+        """Return the options flow handler."""
+        return AdaptiveTPIOptionsFlow(config_entry)
+
+
+class AdaptiveTPIOptionsFlow(OptionsFlow):
+    """Edit Adaptive TPI plugin defaults."""
+
+    def __init__(self, config_entry) -> None:
+        """Store the config entry being edited."""
+        self._config_entry = config_entry
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None):
+        """Handle the options flow."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        defaults = dict(DEFAULT_OPTIONS)
+        defaults.update(self._config_entry.options or self._config_entry.data)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=build_options_schema(defaults),
+        )
