@@ -32,6 +32,33 @@ def _coerce_bootstrap_phase(value: Any) -> str | None:
     return phase
 
 
+def _coerce_int(value: Any) -> int | None:
+    """Convert a persisted integer-like value to int when possible."""
+    if value is None or isinstance(value, bool):
+        return None
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_str_float_dict(value: Any) -> dict[str, float] | None:
+    """Convert a persisted mapping of candidate costs to a clean float dict."""
+    if not isinstance(value, Mapping):
+        return None
+
+    cleaned: dict[str, float] = {}
+    for key, raw_value in value.items():
+        if not isinstance(key, str):
+            continue
+        parsed = _coerce_float(raw_value)
+        if parsed is None:
+            continue
+        cleaned[key] = parsed
+    return cleaned
+
+
 @dataclass(slots=True)
 class AdaptiveTPIState:
     """Compact mutable state for the algorithm scaffold."""
@@ -62,20 +89,51 @@ class AdaptiveTPIState:
     deadtime_second_best_candidate: float | None = None
     deadtime_candidate_costs: dict[str, float] = field(default_factory=dict)
 
-    def to_persisted_dict(self) -> dict[str, float | str]:
-        """Return the minimal state that must survive restarts."""
+    def to_persisted_dict(self) -> dict[str, Any]:
+        """Return the adaptive state that must survive restarts."""
         return {
             "k_int": self.k_int,
             "k_ext": self.k_ext,
             "nd_hat": self.nd_hat,
             "a_hat": self.a_hat,
             "b_hat": self.b_hat,
+            "c_nd": self.c_nd,
+            "c_a": self.c_a,
+            "c_b": self.c_b,
+            "i_a": self.i_a,
+            "i_b": self.i_b,
             "bootstrap_phase": self.bootstrap_phase,
+            "valid_cycles_count": self.valid_cycles_count,
+            "informative_deadtime_cycles_count": self.informative_deadtime_cycles_count,
+            "accepted_cycles_count": self.accepted_cycles_count,
+            "adaptive_cycles_since_phase_c": self.adaptive_cycles_since_phase_c,
+            "hours_without_excitation": self.hours_without_excitation,
+            "cycle_min_at_last_accepted_cycle": self.cycle_min_at_last_accepted_cycle,
+            "deadtime_locked": self.deadtime_locked,
+            "deadtime_best_candidate": self.deadtime_best_candidate,
+            "deadtime_second_best_candidate": self.deadtime_second_best_candidate,
+            "deadtime_candidate_costs": dict(self.deadtime_candidate_costs),
+            "last_freeze_reason": self.last_freeze_reason,
         }
 
     def apply_persisted_dict(self, data: Mapping[str, Any]) -> None:
         """Restore persisted values while keeping deterministic fallbacks."""
-        float_fields = ("k_int", "k_ext", "nd_hat", "a_hat", "b_hat")
+        float_fields = (
+            "k_int",
+            "k_ext",
+            "nd_hat",
+            "a_hat",
+            "b_hat",
+            "c_nd",
+            "c_a",
+            "c_b",
+            "i_a",
+            "i_b",
+            "hours_without_excitation",
+            "cycle_min_at_last_accepted_cycle",
+            "deadtime_best_candidate",
+            "deadtime_second_best_candidate",
+        )
         for field_name in float_fields:
             value = _coerce_float(data.get(field_name))
             if value is not None:
@@ -84,6 +142,27 @@ class AdaptiveTPIState:
         bootstrap_phase = _coerce_bootstrap_phase(data.get("bootstrap_phase"))
         if bootstrap_phase is not None:
             self.bootstrap_phase = bootstrap_phase
+
+        int_fields = (
+            "valid_cycles_count",
+            "informative_deadtime_cycles_count",
+            "accepted_cycles_count",
+            "adaptive_cycles_since_phase_c",
+        )
+        for field_name in int_fields:
+            value = _coerce_int(data.get(field_name))
+            if value is not None:
+                setattr(self, field_name, value)
+
+        if isinstance(data.get("deadtime_locked"), bool):
+            self.deadtime_locked = data["deadtime_locked"]
+
+        candidate_costs = _coerce_str_float_dict(data.get("deadtime_candidate_costs"))
+        if candidate_costs is not None:
+            self.deadtime_candidate_costs = candidate_costs
+
+        if isinstance(data.get("last_freeze_reason"), str):
+            self.last_freeze_reason = data["last_freeze_reason"]
 
     def reset_confidences(self) -> None:
         """Reset adaptive confidences and transient trust markers."""

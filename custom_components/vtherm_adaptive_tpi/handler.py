@@ -211,6 +211,7 @@ class AdaptiveTPIHandler:
             hvac_mode=t.vtherm_hvac_mode,
             power_shedding=t.is_overpowering_detected,
         )
+        await self._async_save_persisted_state()
 
     def update_attributes(self) -> None:
         """Expose the current Adaptive TPI diagnostics on the thermostat."""
@@ -277,6 +278,12 @@ class AdaptiveTPIHandler:
         """Save the minimal adaptive state required across reloads."""
         t = self._thermostat
         if t.prop_algorithm is None:
+            return
+
+        if (
+            hasattr(t.prop_algorithm, "has_pending_learning_update")
+            and not t.prop_algorithm.has_pending_learning_update
+        ):
             return
 
         metadata = {}

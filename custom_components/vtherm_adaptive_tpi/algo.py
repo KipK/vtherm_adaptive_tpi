@@ -233,6 +233,11 @@ class AdaptiveTPIAlgorithm:
         )
         self._supervisor.apply_to_state(self._state)
 
+    @property
+    def has_pending_learning_update(self) -> bool:
+        """Return True when the runtime state has meaningful adaptive history."""
+        return self._state.valid_cycles_count > 0 or self._last_accepted_at is not None
+
     def save_state(self) -> dict:
         """Return a persistable algorithm snapshot."""
         return self._state.to_persisted_dict()
