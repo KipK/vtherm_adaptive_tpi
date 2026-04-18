@@ -8,7 +8,7 @@
     "versatile_thermostat"
   ],
   "requirements": [
-    "vtherm_api@git+https://github.com/KipK/vtherm_api.git@api_algo"
+    "vtherm_api@git+https://github.com/jmcollin78/vtherm_api.git@main"
   ],
   "integration_type": "service",
   "iot_class": "calculated",
@@ -18,4 +18,3 @@
   "documentation": "https://github.com/kipk/vtherm_adaptive_tpi",
   "issue_tracker": "https://github.com/kipk/vtherm_adaptive_tpi/issues"
 }
-
