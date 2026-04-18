@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant
 from vtherm_api.log_collector import get_vtherm_logger
 from vtherm_api.vtherm_api import VThermAPI
 
-from .const import DATA_FACTORY_REGISTERED, DOMAIN
+from .const import DATA_FACTORY_REGISTERED, DOMAIN, PROP_FUNCTION_ADAPTIVE_TPI
 from .factory import AdaptiveTPIHandlerFactory
 
 _LOGGER = get_vtherm_logger(__name__)
+VT_DOMAIN = "versatile_thermostat"
 
 
 def _ensure_domain_data(hass: HomeAssistant) -> dict[str, Any]:
@@ -50,6 +52,17 @@ def _unregister_factory(hass: HomeAssistant) -> None:
     _ensure_domain_data(hass)[DATA_FACTORY_REGISTERED] = False
 
 
+async def _reload_adaptive_tpi_vtherms(hass: HomeAssistant) -> None:
+    """Reload VT entries that currently target the Adaptive TPI algorithm."""
+    reload_tasks = [
+        hass.config_entries.async_reload(entry.entry_id)
+        for entry in hass.config_entries.async_entries(VT_DOMAIN)
+        if entry.data.get("proportional_function") == PROP_FUNCTION_ADAPTIVE_TPI
+    ]
+    if reload_tasks:
+        await asyncio.gather(*reload_tasks)
+
+
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Set up vtherm_adaptive_tpi from YAML."""
     del config
@@ -62,6 +75,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data = _ensure_domain_data(hass)
     data[entry.entry_id] = entry.entry_id
     _register_factory(hass)
+    if hass.state == CoreState.running:
+        await _reload_adaptive_tpi_vtherms(hass)
     return True
 
 
@@ -73,5 +88,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not [key for key in data if key != DATA_FACTORY_REGISTERED]:
         _unregister_factory(hass)
 
+    await _reload_adaptive_tpi_vtherms(hass)
     return True
-
