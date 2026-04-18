@@ -22,6 +22,8 @@ _MIN_DEADTIME_SETPOINT_ERROR = 0.2
 _MIN_DEADTIME_OUTDOOR_DELTA = 1.0
 _MIN_DEADTIME_APPLIED_POWER = 0.15
 _MAX_DEADTIME_APPLIED_POWER = 0.85
+_MIN_ESTIMATOR_SETPOINT_ERROR = 0.2
+_MIN_ESTIMATOR_OUTDOOR_DELTA = 1.0
 
 
 @dataclass(slots=True)
@@ -159,7 +161,12 @@ class AdaptiveTPIAlgorithm:
             return
 
         if elapsed_ratio < 1.0:
-            self._record_cycle_history(pending_cycle, is_valid=False, is_informative=False)
+            self._record_cycle_history(
+                pending_cycle,
+                is_valid=False,
+                is_informative=False,
+                is_estimator_informative=False,
+            )
             self.reject_cycle("cycle_interrupted")
             return
 
@@ -172,7 +179,12 @@ class AdaptiveTPIAlgorithm:
         )
         self._supervisor.apply_to_state(self._state)
         if decision.classification != "accepted":
-            self._record_cycle_history(pending_cycle, is_valid=False, is_informative=False)
+            self._record_cycle_history(
+                pending_cycle,
+                is_valid=False,
+                is_informative=False,
+                is_estimator_informative=False,
+            )
             return
 
         self._last_accepted_at = self._utc_now()
@@ -181,8 +193,16 @@ class AdaptiveTPIAlgorithm:
         if isinstance(cycle_duration_min, (int, float)):
             self._state.cycle_min_at_last_accepted_cycle = float(cycle_duration_min)
 
-        if not self._is_deadtime_informative_cycle(pending_cycle):
-            self._record_cycle_history(pending_cycle, is_valid=True, is_informative=False)
+        deadtime_informative = self._is_deadtime_informative_cycle(pending_cycle)
+        estimator_informative = self._is_estimator_informative_cycle(pending_cycle)
+
+        if not deadtime_informative and not estimator_informative:
+            self._record_cycle_history(
+                pending_cycle,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=False,
+            )
             self._increment_hours_without_excitation(cycle_duration_min)
             self._supervisor.finalize_non_informative_cycle()
             self._supervisor.update_phase_progression(
@@ -194,11 +214,13 @@ class AdaptiveTPIAlgorithm:
             return
 
         self._state.hours_without_excitation = 0.0
-        self._state.informative_deadtime_cycles_count += 1
+        if deadtime_informative:
+            self._state.informative_deadtime_cycles_count += 1
         deadtime_result = self._deadtime_model.record_cycle(
             self._make_deadtime_observation(pending_cycle),
             is_valid=True,
-            is_informative=True,
+            is_informative=deadtime_informative,
+            is_estimator_informative=estimator_informative,
         )
         self._state.nd_hat = deadtime_result.nd_hat
         self._state.c_nd = deadtime_result.c_nd
@@ -220,7 +242,15 @@ class AdaptiveTPIAlgorithm:
         if estimator_sample is not None:
             self._state.i_a = estimator_sample.i_a
             self._state.i_b = estimator_sample.i_b
-        if estimator_sample is not None and estimator_sample.i_global <= 0.0:
+        a_excited = (
+            estimator_sample is not None
+            and min(estimator_sample.i_a, estimator_sample.i_e) > 0.0
+        )
+        b_excited = (
+            estimator_sample is not None
+            and min(estimator_sample.i_b, estimator_sample.i_e) > 0.0
+        )
+        if estimator_sample is not None and not a_excited and not b_excited:
             self._supervisor.finalize_non_informative_cycle()
         elif self._supervisor.allow_estimator_update(
             deadtime_locked=deadtime_result.locked,
@@ -428,6 +458,17 @@ class AdaptiveTPIAlgorithm:
             return False
         return True
 
+    @staticmethod
+    def _is_estimator_informative_cycle(sample: CycleSample) -> bool:
+        """Return True when one cycle is informative for `b`, even with 0% heating."""
+        setpoint_error = abs(sample.target_temp - sample.current_temp)
+        outdoor_delta = abs(sample.current_temp - sample.outdoor_temp)
+        if setpoint_error < _MIN_ESTIMATOR_SETPOINT_ERROR:
+            return False
+        if outdoor_delta < _MIN_ESTIMATOR_OUTDOOR_DELTA:
+            return False
+        return True
+
     def _increment_hours_without_excitation(self, cycle_duration_min: float | None) -> None:
         """Track how long learning has been starved of informative cycles."""
         if isinstance(cycle_duration_min, (int, float)) and cycle_duration_min > 0:
@@ -448,12 +489,14 @@ class AdaptiveTPIAlgorithm:
         *,
         is_valid: bool,
         is_informative: bool,
+        is_estimator_informative: bool,
     ) -> None:
         """Append one real cycle to the temporal history used by identification."""
         self._deadtime_model.record_cycle(
             self._make_deadtime_observation(sample),
             is_valid=is_valid,
             is_informative=is_informative,
+            is_estimator_informative=is_estimator_informative,
         )
 
     def _refresh_projected_gains(self) -> None:

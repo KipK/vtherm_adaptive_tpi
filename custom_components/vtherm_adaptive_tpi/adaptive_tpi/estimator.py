@@ -39,6 +39,7 @@ class EstimatorSample:
     c_nd: float
     i_a: float
     i_b: float
+    i_e: float
     i_global: float
 
 
@@ -69,7 +70,7 @@ def build_estimator_sample(
     current_index = None
     delayed_index = None
     for candidate_index in range(len(observations) - 2, -1, -1):
-        if not observations[candidate_index].is_informative:
+        if not observations[candidate_index].is_estimator_informative:
             continue
         if not observations[candidate_index + 1].is_valid:
             continue
@@ -89,7 +90,7 @@ def build_estimator_sample(
 
     y = nxt.tin - current.tin
     loss_input = -(current.tin - current.tout)
-    i_a, i_b, i_global = compute_excitation_scores(
+    i_a, i_b, i_e, i_global = compute_excitation_scores(
         u_del=delayed.applied_power,
         tin=current.tin,
         tout=current.tout,
@@ -102,6 +103,7 @@ def build_estimator_sample(
         c_nd=c_nd,
         i_a=i_a,
         i_b=i_b,
+        i_e=i_e,
         i_global=i_global,
     )
 
@@ -112,14 +114,14 @@ def compute_excitation_scores(
     tin: float,
     tout: float,
     target_temp: float,
-) -> tuple[float, float, float]:
+) -> tuple[float, float, float, float]:
     """Compute the v1 excitation scores used by the estimator."""
     i_a = _clamp((u_del - U_MIN_ID) / (U_MAX_ID - U_MIN_ID), 0.0, 1.0)
     delta_out = abs(tin - tout)
     i_b = _clamp((delta_out - D_OUT_MIN) / (D_OUT_MAX - D_OUT_MIN), 0.0, 1.0)
     delta_in = abs(target_temp - tin)
     i_e = _clamp((delta_in - D_IN_MIN) / (D_IN_MAX - D_IN_MIN), 0.0, 1.0)
-    return i_a, i_b, min(i_a, i_b, i_e)
+    return i_a, i_b, i_e, min(i_a, i_b, i_e)
 
 
 class ParameterEstimator:
@@ -170,21 +172,26 @@ class ParameterEstimator:
         phi_norm_sq = (sample.u_del * sample.u_del) + (sample.loss_input * sample.loss_input)
         prediction = (sample.u_del * self.a_hat) + (sample.loss_input * self.b_hat)
         residual = sample.y - prediction
-        mu = MU0 * sample.c_nd * sample.i_global
+        mu_a = MU0 * sample.c_nd * min(sample.i_a, sample.i_e)
+        mu_b = MU0 * sample.c_nd * min(sample.i_b, sample.i_e)
 
-        if mu > 0.0:
-            step = mu * residual / (EPS0 + phi_norm_sq)
-            self.a_hat = _clamp(self.a_hat + (step * sample.u_del), A_MIN, A_MAX)
-            self.b_hat = _clamp(self.b_hat + (step * sample.loss_input), B_MIN, B_MAX)
+        if mu_a > 0.0:
+            step_a = mu_a * residual / (EPS0 + phi_norm_sq)
+            self.a_hat = _clamp(self.a_hat + (step_a * sample.u_del), A_MIN, A_MAX)
+        if mu_b > 0.0:
+            step_b = mu_b * residual / (EPS0 + phi_norm_sq)
+            self.b_hat = _clamp(self.b_hat + (step_b * sample.loss_input), B_MIN, B_MAX)
 
         q = exp(-abs(residual) / E_SCALE)
         self.c_a = _clamp(
-            ((1.0 - ALPHA_C) * self.c_a) + (ALPHA_C * q * sample.i_a * sample.c_nd),
+            ((1.0 - ALPHA_C) * self.c_a)
+            + (ALPHA_C * q * min(sample.i_a, sample.i_e) * sample.c_nd),
             0.0,
             1.0,
         )
         self.c_b = _clamp(
-            ((1.0 - ALPHA_C) * self.c_b) + (ALPHA_C * q * sample.i_b * sample.c_nd),
+            ((1.0 - ALPHA_C) * self.c_b)
+            + (ALPHA_C * q * min(sample.i_b, sample.i_e) * sample.c_nd),
             0.0,
             1.0,
         )
@@ -197,5 +204,5 @@ class ParameterEstimator:
             i_a=sample.i_a,
             i_b=sample.i_b,
             residual=residual,
-            updated=mu > 0.0,
+            updated=(mu_a > 0.0 or mu_b > 0.0),
         )

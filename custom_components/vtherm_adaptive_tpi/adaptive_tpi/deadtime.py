@@ -42,6 +42,7 @@ class CycleHistoryEntry:
     applied_power: float
     is_valid: bool
     is_informative: bool
+    is_estimator_informative: bool
 
 
 @dataclass(slots=True)
@@ -139,6 +140,7 @@ class DeadtimeModel:
             observation,
             is_valid=True,
             is_informative=True,
+            is_estimator_informative=True,
         )
         return self.last_result
 
@@ -148,6 +150,7 @@ class DeadtimeModel:
         *,
         is_valid: bool,
         is_informative: bool,
+        is_estimator_informative: bool = False,
     ) -> DeadtimeSearchResult:
         """Append one real cycle while preserving temporal alignment."""
         previous_entry = self._cycle_history[-1] if self._cycle_history else None
@@ -159,6 +162,7 @@ class DeadtimeModel:
                 applied_power=observation.applied_power,
                 is_valid=is_valid,
                 is_informative=is_informative,
+                is_estimator_informative=is_estimator_informative,
             )
         )
         self.last_result = self.evaluate(
