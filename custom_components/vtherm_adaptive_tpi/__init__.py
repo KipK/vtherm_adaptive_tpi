@@ -221,5 +221,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _unregister_factory(hass)
         _unregister_services(hass)
 
-    await _reload_adaptive_tpi_vtherms(hass)
+    # Only force VT reloads for live uninstall/reconfiguration.
+    # During HA shutdown, reloading VT entries here can recreate entities before
+    # RestoreEntity/recorder have dumped the final requested state, which risks
+    # persisting an OFF bootstrap state and restoring OFF at next startup.
+    if hass.state == CoreState.running:
+        await _reload_adaptive_tpi_vtherms(hass)
     return True
