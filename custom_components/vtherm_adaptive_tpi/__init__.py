@@ -9,14 +9,17 @@ from homeassistant.components.climate import DOMAIN as CLIMATE_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import service as service_helper
 from vtherm_api.log_collector import get_vtherm_logger
 from vtherm_api.vtherm_api import VThermAPI
 
 from .const import (
     CONF_TARGET_VTHERM,
     DATA_FACTORY_REGISTERED,
+    DATA_SERVICES_REGISTERED,
     DOMAIN,
     PROP_FUNCTION_ADAPTIVE_TPI,
+    SERVICE_RESET_LEARNING,
 )
 from .factory import AdaptiveTPIHandlerFactory
 
@@ -28,6 +31,16 @@ DATA_SKIP_FULL_RELOAD = "skip_full_reload"
 def _ensure_domain_data(hass: HomeAssistant) -> dict[str, Any]:
     """Return the plugin data storage in hass."""
     return hass.data.setdefault(DOMAIN, {})
+
+
+def _active_entry_keys(data: dict[str, Any]) -> list[str]:
+    """Return only actual config-entry keys stored in domain data."""
+    return [
+        key
+        for key in data
+        if key not in {DATA_FACTORY_REGISTERED, DATA_SERVICES_REGISTERED}
+        and not key.startswith(f"{DATA_SKIP_FULL_RELOAD}_")
+    ]
 
 
 def _register_factory(hass: HomeAssistant) -> bool:
@@ -58,6 +71,44 @@ def _unregister_factory(hass: HomeAssistant) -> None:
     if api is not None:
         api.unregister_prop_algorithm(AdaptiveTPIHandlerFactory().name)
     _ensure_domain_data(hass)[DATA_FACTORY_REGISTERED] = False
+
+
+def _register_services(hass: HomeAssistant) -> None:
+    """Register Adaptive TPI services on the plugin domain."""
+    data = _ensure_domain_data(hass)
+    if data.get(DATA_SERVICES_REGISTERED) is True:
+        return
+
+    async def _call_on_vtherms(call, method_name: str) -> None:
+        entity_ids = service_helper.async_extract_entity_ids(hass, call)
+        component = hass.data.get(CLIMATE_DOMAIN)
+        if not component:
+            return
+        for entity in list(component.entities):
+            if entity.entity_id not in entity_ids:
+                continue
+            if getattr(entity, "proportional_function", None) != PROP_FUNCTION_ADAPTIVE_TPI:
+                continue
+            handler = getattr(entity, method_name, None)
+            if handler is None:
+                _LOGGER.warning(
+                    "Service %s not available on %s", method_name, entity.entity_id
+                )
+                continue
+            await handler()
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RESET_LEARNING,
+        lambda call: _call_on_vtherms(call, "service_reset_learning"),
+    )
+    data[DATA_SERVICES_REGISTERED] = True
+
+
+def _unregister_services(hass: HomeAssistant) -> None:
+    """Unregister Adaptive TPI services from the plugin domain."""
+    hass.services.async_remove(DOMAIN, SERVICE_RESET_LEARNING)
+    _ensure_domain_data(hass)[DATA_SERVICES_REGISTERED] = False
 
 
 async def _reload_adaptive_tpi_vtherms(hass: HomeAssistant) -> None:
@@ -131,6 +182,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Set up vtherm_adaptive_tpi from YAML."""
     del config
     _register_factory(hass)
+    _register_services(hass)
     return True
 
 
@@ -153,6 +205,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data[entry.entry_id] = entry.entry_id
     entry.async_on_unload(entry.add_update_listener(_async_update_options))
     _register_factory(hass)
+    _register_services(hass)
     skip_full_reload = data.pop(f"{DATA_SKIP_FULL_RELOAD}_{entry.entry_id}", False)
     if hass.state == CoreState.running and not skip_full_reload:
         await _reload_adaptive_tpi_vtherms(hass)
@@ -164,8 +217,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data = _ensure_domain_data(hass)
     data.pop(entry.entry_id, None)
 
-    if not [key for key in data if key != DATA_FACTORY_REGISTERED]:
+    if not _active_entry_keys(data):
         _unregister_factory(hass)
+        _unregister_services(hass)
 
     await _reload_adaptive_tpi_vtherms(hass)
     return True

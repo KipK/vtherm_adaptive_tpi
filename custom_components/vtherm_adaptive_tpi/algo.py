@@ -252,6 +252,23 @@ class AdaptiveTPIAlgorithm:
         """Return a persistable algorithm snapshot."""
         return self._state.to_persisted_dict()
 
+    def reset_learning(self) -> None:
+        """Reset all learned state and return to a fresh bootstrap runtime."""
+        self._state = AdaptiveTPIState(
+            k_int=DEFAULT_KINT,
+            k_ext=DEFAULT_KEXT,
+        )
+        self._supervisor.reset()
+        self._deadtime_model.reset()
+        self._estimator.reset()
+        self._state.a_hat = self._estimator.a_hat
+        self._state.b_hat = self._estimator.b_hat
+        self._state.c_a = self._estimator.c_a
+        self._state.c_b = self._estimator.c_b
+        self._last_accepted_at = None
+        self._temperature_available = False
+        self._pending_cycle_sample = None
+
     def persistence_metadata(self, *, cycle_min: float) -> dict[str, Any]:
         """Return the persistence metadata required for safe warm starts."""
         return {

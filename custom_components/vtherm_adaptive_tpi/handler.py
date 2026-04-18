@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.helpers.storage import Store
@@ -33,6 +34,7 @@ class AdaptiveTPIHandler:
         self._thermostat = thermostat
         self._should_publish_intermediate = True
         storage_key = self._build_storage_key(thermostat.unique_id)
+        self._storage_key = storage_key
         self._store: Store[dict[str, Any]] = Store(
             thermostat.hass,
             PERSISTENCE_SCHEMA_VERSION,
@@ -296,3 +298,27 @@ class AdaptiveTPIHandler:
             "state": t.prop_algorithm.save_state(),
         }
         await self._store.async_save(payload)
+
+    async def service_reset_learning(self) -> None:
+        """Reset the runtime learning state and purge any persisted snapshot."""
+        t = self._thermostat
+        if t.prop_algorithm is None or not hasattr(t.prop_algorithm, "reset_learning"):
+            return
+
+        t.prop_algorithm.reset_learning()
+        await self._async_delete_persisted_state()
+        self.update_attributes()
+        t.async_write_ha_state()
+
+    async def _async_delete_persisted_state(self) -> None:
+        """Delete the persisted snapshot file for this thermostat, if present."""
+        storage_path = Path(self._thermostat.hass.config.path(".storage", self._storage_key))
+        try:
+            storage_path.unlink(missing_ok=True)
+        except OSError as err:
+            _LOGGER.warning(
+                "%s - Unable to delete persisted Adaptive TPI state %s: %s",
+                self._thermostat,
+                storage_path,
+                err,
+            )

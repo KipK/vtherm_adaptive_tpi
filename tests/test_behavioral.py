@@ -328,6 +328,35 @@ def test_calculate_does_not_adapt_gains_on_sensor_refresh() -> None:
     assert diagnostics["Kext"] == pytest.approx(0.04)
 
 
+def test_reset_learning_restores_fresh_bootstrap_defaults() -> None:
+    """A manual reset should clear all learned runtime state."""
+    algo = AdaptiveTPIAlgorithm(name="test-reset", debug_mode=True)
+    algo._state.k_int = 1.2
+    algo._state.k_ext = 0.0
+    algo._state.nd_hat = 2.0
+    algo._state.c_nd = 0.7
+    algo._state.a_hat = 0.12
+    algo._state.b_hat = 0.02
+    algo._state.c_a = 0.6
+    algo._state.c_b = 0.5
+    algo._state.accepted_cycles_count = 12
+    algo._state.valid_cycles_count = 12
+    algo._state.bootstrap_phase = "phase_c"
+
+    algo.reset_learning()
+
+    diagnostics = algo.get_diagnostics()
+    assert diagnostics["bootstrap_phase"] == "startup"
+    assert diagnostics["Kint"] == pytest.approx(0.6)
+    assert diagnostics["Kext"] == pytest.approx(0.01)
+    assert diagnostics["nd_hat"] == pytest.approx(0.0)
+    assert diagnostics["c_nd"] == pytest.approx(0.0)
+    assert diagnostics["a_hat"] == pytest.approx(0.001)
+    assert diagnostics["b_hat"] == pytest.approx(0.0)
+    assert diagnostics["accepted_cycles_count"] == 0
+    assert diagnostics["debug"]["deadtime_locked"] is False
+
+
 def test_cycle_min_change_invalidates_persisted_warm_start() -> None:
     """A cycle duration change should rescale estimates and re-enter Phase A."""
     algo = AdaptiveTPIAlgorithm(name="test-persistence", debug_mode=True)

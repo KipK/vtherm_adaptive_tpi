@@ -26,4 +26,6 @@ DEFAULT_OPTIONS: dict[str, str | int | bool] = {
 PROP_FUNCTION_ADAPTIVE_TPI = "adaptive_tpi"
 
 DATA_FACTORY_REGISTERED = "factory_registered"
+DATA_SERVICES_REGISTERED = "services_registered"
 
+SERVICE_RESET_LEARNING = "reset_learning"

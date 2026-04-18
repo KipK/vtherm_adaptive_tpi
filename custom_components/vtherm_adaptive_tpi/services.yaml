@@ -1,0 +1,11 @@
+reset_learning:
+  name: Reset Adaptive TPI learning
+  description: Reset the Adaptive TPI learning state for a thermostat.
+  fields:
+    entity_id:
+      name: Target thermostat
+      description: The VTherm climate entity to reset.
+      required: true
+      selector:
+        entity:
+          domain: climate
