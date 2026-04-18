@@ -278,7 +278,7 @@ class DeadtimeModel:
     def _solve_constrained_pair(
         rows: list[tuple[float, float, float]],
     ) -> tuple[float, float] | None:
-        """Solve the temporary least-squares pair and clamp it to physical bounds."""
+        """Solve the temporary least-squares pair under the simple physical bounds."""
         sum_x1x1 = 0.0
         sum_x1x2 = 0.0
         sum_x2x2 = 0.0
@@ -298,7 +298,15 @@ class DeadtimeModel:
 
         a_c = ((sum_x1y * sum_x2x2) - (sum_x2y * sum_x1x2)) / determinant
         b_c = ((sum_x1x1 * sum_x2y) - (sum_x1x2 * sum_x1y)) / determinant
-        return max(A_FLOOR, a_c), max(0.0, b_c)
+        if b_c >= 0.0:
+            return max(A_FLOOR, a_c), b_c
+
+        # When the unconstrained fit pushes b below zero, the physically valid
+        # projection is the one-dimensional refit with b fixed to 0.
+        if sum_x1x1 < 1e-9:
+            return A_FLOOR, 0.0
+        a_proj = sum_x1y / sum_x1x1
+        return max(A_FLOOR, a_proj), 0.0
 
     @staticmethod
     def _dominance_ratio(best_cost: float, second_cost: float | None) -> float:

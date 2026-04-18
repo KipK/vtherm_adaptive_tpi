@@ -224,6 +224,22 @@ def test_deadtime_search_keeps_real_cycle_alignment_across_noninformative_gaps()
     assert result.best_candidate == pytest.approx(1.0)
 
 
+def test_deadtime_constrained_fit_refits_when_b_would_be_negative() -> None:
+    """The constrained fit should refit with b=0 instead of clamping the unconstrained solution."""
+    rows = [
+        (1.0, 1.0, 0.2),
+        (2.0, 1.0, 0.6),
+        (1.0, 2.0, 0.1),
+    ]
+
+    fit = DeadtimeModel._solve_constrained_pair(rows)
+
+    assert fit is not None
+    a_c, b_c = fit
+    assert a_c == pytest.approx(0.25)
+    assert b_c == pytest.approx(0.0)
+
+
 def test_learning_window_can_extend_across_multiple_off_cycles() -> None:
     """A weak OFF cycle may be extended with the next one to produce a usable slope."""
     result = build_learning_window(
