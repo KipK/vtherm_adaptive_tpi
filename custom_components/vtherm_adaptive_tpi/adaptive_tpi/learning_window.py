@@ -91,9 +91,27 @@ def build_learning_window(
             reason=f"{regime}_window_setpoint_changed",
             waiting_next_cycle=False,
         )
+    if start_index > 0 and _has_setpoint_jump(observations[start_index - 1], observations[start_index]):
+        return LearningWindowResult(
+            sample=None,
+            reason=f"{regime}_window_setpoint_changed",
+            waiting_next_cycle=False,
+        )
 
     start_observation = observations[start_index]
     amplitude = end_observation.tin - start_observation.tin
+    if regime == WINDOW_REGIME_OFF and amplitude >= 0.0:
+        return LearningWindowResult(
+            sample=None,
+            reason="off_window_external_gain",
+            waiting_next_cycle=False,
+        )
+    if regime == WINDOW_REGIME_ON and amplitude <= 0.0:
+        return LearningWindowResult(
+            sample=None,
+            reason="on_window_no_heating_effect",
+            waiting_next_cycle=False,
+        )
     if (
         abs(amplitude) < MIN_WINDOW_AMPLITUDE
         or total_duration_min < MIN_WINDOW_DURATION_MIN

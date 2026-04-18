@@ -25,6 +25,7 @@ from custom_components.vtherm_adaptive_tpi.adaptive_tpi.estimator import (
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.learning_window import (
     WINDOW_REGIME_OFF,
+    WINDOW_REGIME_ON,
     build_learning_window,
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.supervisor import (
@@ -438,6 +439,145 @@ def test_learning_window_rejects_setpoint_jump() -> None:
 
     assert result.sample is None
     assert result.reason == "off_window_setpoint_changed"
+
+
+def test_learning_window_rejects_setpoint_jump_before_window_start() -> None:
+    """A target jump just before the selected window must also invalidate learning."""
+    result = build_learning_window(
+        (
+            CycleHistoryEntry(
+                tin=20.3,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.6,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=20.0,
+                tout=10.0,
+                target_temp=20.4,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.7,
+                tout=10.0,
+                target_temp=20.4,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.4,
+                tout=10.0,
+                target_temp=20.4,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+        ),
+        nd_hat=1.0,
+        regime=WINDOW_REGIME_OFF,
+    )
+
+    assert result.sample is None
+    assert result.reason == "off_window_setpoint_changed"
+
+
+def test_learning_window_rejects_off_window_when_temperature_rises() -> None:
+    """OFF windows with a positive thermal drift should be rejected explicitly."""
+    result = build_learning_window(
+        (
+            CycleHistoryEntry(
+                tin=19.0,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=5.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.2,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=5.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.3,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=5.0,
+            ),
+        ),
+        nd_hat=0.0,
+        regime=WINDOW_REGIME_OFF,
+    )
+
+    assert result.sample is None
+    assert result.reason == "off_window_external_gain"
+
+
+def test_learning_window_rejects_on_window_when_temperature_drops() -> None:
+    """ON windows with no positive thermal response should be rejected explicitly."""
+    result = build_learning_window(
+        (
+            CycleHistoryEntry(
+                tin=20.0,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.8,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=True,
+                cycle_duration_min=5.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.8,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.8,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=True,
+                cycle_duration_min=5.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.7,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.8,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=True,
+                cycle_duration_min=5.0,
+            ),
+        ),
+        nd_hat=0.0,
+        regime=WINDOW_REGIME_ON,
+    )
+
+    assert result.sample is None
+    assert result.reason == "on_window_no_heating_effect"
 
 
 def test_estimator_can_learn_b_on_zero_power_cycles() -> None:
