@@ -18,6 +18,10 @@ from .const import DEFAULT_KEXT, DEFAULT_KINT
 _LOGGER = logging.getLogger(__name__)
 _CONFIDENCE_DECAY_30_DAYS = 30
 _CONFIDENCE_DECAY_90_DAYS = 90
+_MIN_DEADTIME_SETPOINT_ERROR = 0.2
+_MIN_DEADTIME_OUTDOOR_DELTA = 1.0
+_MIN_DEADTIME_APPLIED_POWER = 0.15
+_MAX_DEADTIME_APPLIED_POWER = 0.85
 
 
 @dataclass(slots=True)
@@ -88,14 +92,6 @@ class AdaptiveTPIAlgorithm:
             self._temperature_available = False
             return
 
-        self._state.k_int, self._state.k_ext = project_gains(
-            phase=self._state.bootstrap_phase,
-            k_int=self._state.k_int,
-            k_ext=self._state.k_ext,
-            a_hat=self._state.a_hat,
-            b_hat=self._state.b_hat,
-            nd_hat=self._state.nd_hat,
-        )
         self._temperature_available = True
         self._state.calculated_on_percent = compute_on_percent(
             hvac_mode=hvac_mode,
@@ -179,6 +175,22 @@ class AdaptiveTPIAlgorithm:
 
         self._last_accepted_at = self._utc_now()
         self._state.valid_cycles_count += 1
+        self._state.accepted_cycles_count += 1
+        if isinstance(cycle_duration_min, (int, float)):
+            self._state.cycle_min_at_last_accepted_cycle = float(cycle_duration_min)
+
+        if not self._is_deadtime_informative_cycle(pending_cycle):
+            self._increment_hours_without_excitation(cycle_duration_min)
+            self._supervisor.finalize_non_informative_cycle()
+            self._supervisor.update_phase_progression(
+                self._state,
+                deadtime_costs_available=False,
+                estimator_updated=False,
+            )
+            self._supervisor.apply_to_state(self._state)
+            return
+
+        self._state.hours_without_excitation = 0.0
         deadtime_result = self._deadtime_model.record_accepted_observation(
             DeadtimeObservation(
                 tin=pending_cycle.current_temp,
@@ -187,7 +199,6 @@ class AdaptiveTPIAlgorithm:
                 applied_power=self._state.on_percent,
             )
         )
-        self._state.accepted_cycles_count = self._deadtime_model.accepted_cycle_count
         self._state.nd_hat = deadtime_result.nd_hat
         self._state.c_nd = deadtime_result.c_nd
         self._state.deadtime_locked = deadtime_result.locked
@@ -196,8 +207,6 @@ class AdaptiveTPIAlgorithm:
         self._state.deadtime_candidate_costs = deadtime_result.candidate_costs
         if deadtime_result.candidate_costs:
             self._state.informative_deadtime_cycles_count += 1
-        if isinstance(cycle_duration_min, (int, float)):
-            self._state.cycle_min_at_last_accepted_cycle = float(cycle_duration_min)
         self._supervisor.apply_deadtime_result(
             locked=deadtime_result.locked,
             confidence=deadtime_result.c_nd,
@@ -231,6 +240,7 @@ class AdaptiveTPIAlgorithm:
             deadtime_costs_available=bool(deadtime_result.candidate_costs),
             estimator_updated=estimator_updated,
         )
+        self._refresh_projected_gains()
         self._supervisor.apply_to_state(self._state)
 
     @property
@@ -285,6 +295,7 @@ class AdaptiveTPIAlgorithm:
             self._state.c_b = self._estimator.c_b
             self._supervisor.set_phase(self._state.bootstrap_phase)
             self._supervisor.apply_to_state(self._state)
+            self._refresh_projected_gains()
         except (AttributeError, TypeError, ValueError) as err:
             _LOGGER.warning(
                 "%s - Ignoring invalid persisted Adaptive TPI state: %s",
@@ -385,3 +396,37 @@ class AdaptiveTPIAlgorithm:
     def _utc_now() -> datetime:
         """Return the current timezone-aware UTC time."""
         return datetime.now(timezone.utc)
+
+    @staticmethod
+    def _is_deadtime_informative_cycle(sample: CycleSample) -> bool:
+        """Return True when one completed cycle is worth feeding to learning."""
+        setpoint_error = abs(sample.target_temp - sample.current_temp)
+        outdoor_delta = abs(sample.current_temp - sample.outdoor_temp)
+        if setpoint_error < _MIN_DEADTIME_SETPOINT_ERROR:
+            return False
+        if outdoor_delta < _MIN_DEADTIME_OUTDOOR_DELTA:
+            return False
+        if sample.applied_power < _MIN_DEADTIME_APPLIED_POWER:
+            return False
+        if sample.applied_power > _MAX_DEADTIME_APPLIED_POWER:
+            return False
+        return True
+
+    def _increment_hours_without_excitation(self, cycle_duration_min: float | None) -> None:
+        """Track how long learning has been starved of informative cycles."""
+        if isinstance(cycle_duration_min, (int, float)) and cycle_duration_min > 0:
+            self._state.hours_without_excitation += float(cycle_duration_min) / 60.0
+
+    def _refresh_projected_gains(self) -> None:
+        """Update controller gains only on learning boundaries, not sensor refreshes."""
+        self._state.k_int, self._state.k_ext = project_gains(
+            phase=self._state.bootstrap_phase,
+            k_int=self._state.k_int,
+            k_ext=self._state.k_ext,
+            a_hat=self._state.a_hat,
+            b_hat=self._state.b_hat,
+            nd_hat=self._state.nd_hat,
+            c_nd=self._state.c_nd,
+            c_a=self._state.c_a,
+            c_b=self._state.c_b,
+        )

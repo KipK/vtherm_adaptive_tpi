@@ -23,6 +23,7 @@ from custom_components.vtherm_adaptive_tpi.adaptive_tpi.estimator import (
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.supervisor import (
     PHASE_A,
+    PHASE_B,
     PHASE_C,
 )
 
@@ -273,10 +274,58 @@ def test_gain_projection_matches_structural_formulas() -> None:
         a_hat=0.2,
         b_hat=0.03,
         nd_hat=2.0,
+        c_nd=0.8,
+        c_a=0.8,
+        c_b=0.8,
     )
 
     assert next_k_int == pytest.approx(0.23)
     assert next_k_ext == pytest.approx(0.015)
+
+
+def test_gain_projection_keeps_bootstrap_defaults_while_confidence_is_low() -> None:
+    """Low-confidence bootstrap should hold gains at their safe defaults."""
+    next_k_int, next_k_ext = project_gains(
+        phase=PHASE_B,
+        k_int=1.2,
+        k_ext=0.0,
+        a_hat=0.001,
+        b_hat=0.0,
+        nd_hat=0.0,
+        c_nd=0.1,
+        c_a=0.0,
+        c_b=0.0,
+    )
+
+    assert next_k_int == pytest.approx(0.6)
+    assert next_k_ext == pytest.approx(0.01)
+
+
+def test_calculate_does_not_adapt_gains_on_sensor_refresh() -> None:
+    """Repeated calculate calls must not move gains outside cycle callbacks."""
+    algo = AdaptiveTPIAlgorithm(name="test-refresh-stability", debug_mode=True)
+    algo._state.k_int = 0.72
+    algo._state.k_ext = 0.04
+    algo._state.bootstrap_phase = PHASE_C
+    algo._state.a_hat = 0.2
+    algo._state.b_hat = 0.03
+    algo._state.nd_hat = 2.0
+    algo._state.c_nd = 0.8
+    algo._state.c_a = 0.8
+    algo._state.c_b = 0.8
+
+    for _ in range(5):
+        algo.calculate(
+            target_temp=21.0,
+            current_temp=20.0,
+            ext_current_temp=8.0,
+            slope=None,
+            hvac_mode="heat",
+        )
+
+    diagnostics = algo.get_diagnostics()
+    assert diagnostics["Kint"] == pytest.approx(0.72)
+    assert diagnostics["Kext"] == pytest.approx(0.04)
 
 
 def test_cycle_min_change_invalidates_persisted_warm_start() -> None:
@@ -306,3 +355,42 @@ def test_cycle_min_change_invalidates_persisted_warm_start() -> None:
     assert diagnostics["last_freeze_reason"] == "cycle_min_changed_revalidation"
     assert diagnostics["debug"]["deadtime_locked"] is False
     assert diagnostics["deadtime_candidate_costs"] == {}
+
+
+def test_bootstrap_stuck_exposes_explicit_freeze_reason() -> None:
+    """Repeated low-information cycles should trip the bootstrap stuck guard."""
+    algo = AdaptiveTPIAlgorithm(name="test-bootstrap-stuck", debug_mode=True)
+
+    for _ in range(10):
+        algo.calculate(
+            target_temp=20.0,
+            current_temp=19.95,
+            ext_current_temp=19.5,
+            slope=None,
+            hvac_mode="heat",
+            cycle_min=5.0,
+        )
+        algo.on_cycle_started(
+            on_time_sec=0.0,
+            off_time_sec=300.0,
+            on_percent=0.0,
+            hvac_mode="heat",
+            target_temp=20.0,
+            current_temp=19.95,
+            ext_current_temp=19.5,
+        )
+        algo.on_cycle_completed(
+            e_eff=0.0,
+            elapsed_ratio=1.0,
+            cycle_duration_min=5.0,
+            target_temp=20.0,
+            current_temp=19.95,
+            ext_current_temp=19.5,
+            hvac_mode="heat",
+        )
+
+    diagnostics = algo.get_diagnostics()
+    assert diagnostics["bootstrap_phase"] == PHASE_A
+    assert diagnostics["accepted_cycles_count"] == 10
+    assert diagnostics["hours_without_excitation"] == pytest.approx(10 * 5.0 / 60.0)
+    assert diagnostics["last_freeze_reason"] == "insufficient_excitation_bootstrap"

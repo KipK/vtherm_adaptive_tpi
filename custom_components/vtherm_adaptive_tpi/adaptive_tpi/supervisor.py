@@ -22,6 +22,9 @@ SUPERVISOR_PHASES = (
     PHASE_D,
 )
 
+BOOTSTRAP_STUCK_MIN_VALID_CYCLES = 10
+BOOTSTRAP_STUCK_MAX_DEADTIME_CONFIDENCE = 0.2
+
 
 @dataclass(slots=True)
 class SupervisorDecision:
@@ -195,6 +198,10 @@ class AdaptiveTPISupervisor:
         if self.phase == PHASE_A and not deadtime_costs_available and self.last_decision.classification == "accepted":
             self.last_freeze_reason = "deadtime_observation_window_too_short"
 
+        stuck_reason = self._bootstrap_stuck_reason(state)
+        if stuck_reason is not None:
+            self.last_freeze_reason = stuck_reason
+
         return self.phase
 
     def finalize_non_informative_cycle(self, reason: str = "non_informative_cycle") -> SupervisorDecision:
@@ -229,3 +236,15 @@ class AdaptiveTPISupervisor:
         a_motion = abs(self._a_history[-1] - self._a_history[0]) / max(state.a_hat, 1e-3)
         b_motion = abs(self._b_history[-1] - self._b_history[0]) / max(state.b_hat, 1e-3)
         return a_motion < 0.10 and b_motion < 0.10
+
+    def _bootstrap_stuck_reason(self, state: AdaptiveTPIState) -> str | None:
+        """Return an explicit bootstrap blocker when learning stays uninformative."""
+        if self.phase not in (PHASE_A, PHASE_B):
+            return None
+        if state.deadtime_locked:
+            return None
+        if state.valid_cycles_count < BOOTSTRAP_STUCK_MIN_VALID_CYCLES:
+            return None
+        if state.c_nd >= BOOTSTRAP_STUCK_MAX_DEADTIME_CONFIDENCE:
+            return None
+        return "insufficient_excitation_bootstrap"
