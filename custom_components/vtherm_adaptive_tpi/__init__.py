@@ -91,6 +91,9 @@ def _register_services(hass: HomeAssistant) -> None:
                 continue
             handler = getattr(entity, method_name, None)
             if handler is None:
+                algo_handler = getattr(entity, "_algo_handler", None)
+                handler = getattr(algo_handler, method_name, None) if algo_handler is not None else None
+            if handler is None:
                 _LOGGER.warning(
                     "Service %s not available on %s", method_name, entity.entity_id
                 )
