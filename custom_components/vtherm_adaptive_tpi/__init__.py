@@ -80,25 +80,92 @@ def _register_services(hass: HomeAssistant) -> None:
         return
 
     async def _call_on_vtherms(call, method_name: str) -> None:
-        entity_ids = service_helper.async_extract_entity_ids(hass, call)
+        entity_ids = set(service_helper.async_extract_entity_ids(hass, call))
+
+        call_target = getattr(call, "target", None)
+        if isinstance(call_target, dict):
+            target_entity_ids = call_target.get("entity_id")
+            if isinstance(target_entity_ids, str):
+                entity_ids.add(target_entity_ids)
+            elif isinstance(target_entity_ids, list):
+                entity_ids.update(
+                    entity_id for entity_id in target_entity_ids if isinstance(entity_id, str)
+                )
+
+        explicit_entity_ids = call.data.get("entity_id")
+        if isinstance(explicit_entity_ids, str):
+            entity_ids.add(explicit_entity_ids)
+        elif isinstance(explicit_entity_ids, list):
+            entity_ids.update(
+                entity_id for entity_id in explicit_entity_ids if isinstance(entity_id, str)
+            )
+
         component = hass.data.get(CLIMATE_DOMAIN)
-        if not component:
+        if not component or not entity_ids:
+            _LOGGER.warning(
+                "Adaptive TPI service %s ignored: no target climate entities resolved",
+                method_name,
+            )
             return
-        for entity in list(component.entities):
-            if entity.entity_id not in entity_ids:
+
+        invoked_count = 0
+        missing_entity_ids: list[str] = []
+        for entity_id in sorted(entity_ids):
+            entity = component.get_entity(entity_id) if hasattr(component, "get_entity") else None
+            if entity is None:
+                entity = next(
+                    (candidate for candidate in list(component.entities) if candidate.entity_id == entity_id),
+                    None,
+                )
+            if entity is None:
+                missing_entity_ids.append(entity_id)
                 continue
-            if getattr(entity, "proportional_function", None) != PROP_FUNCTION_ADAPTIVE_TPI:
-                continue
+
             handler = getattr(entity, method_name, None)
-            if handler is None:
-                algo_handler = getattr(entity, "_algo_handler", None)
-                handler = getattr(algo_handler, method_name, None) if algo_handler is not None else None
+            algo_handler = getattr(entity, "_algo_handler", None)
+            if handler is None and algo_handler is not None:
+                handler = getattr(algo_handler, method_name, None)
             if handler is None:
                 _LOGGER.warning(
                     "Service %s not available on %s", method_name, entity.entity_id
                 )
                 continue
+
+            proportional_function = getattr(entity, "proportional_function", None)
+            if (
+                proportional_function != PROP_FUNCTION_ADAPTIVE_TPI
+                and getattr(algo_handler, "__class__", type(None)).__module__.split(".")[-1] != "handler"
+            ):
+                _LOGGER.warning(
+                    "Service %s ignored on %s because it is not using Adaptive TPI",
+                    method_name,
+                    entity.entity_id,
+                )
+                continue
+
             await handler()
+            invoked_count += 1
+
+        if missing_entity_ids:
+            _LOGGER.warning(
+                "Adaptive TPI service %s could not resolve climate entities: %s",
+                method_name,
+                missing_entity_ids,
+            )
+
+        if invoked_count == 0:
+            _LOGGER.warning(
+                "Adaptive TPI service %s did not match any active thermostat handler for %s",
+                method_name,
+                sorted(entity_ids),
+            )
+        else:
+            _LOGGER.info(
+                "Adaptive TPI service %s applied to %d thermostat(s): %s",
+                method_name,
+                invoked_count,
+                sorted(entity_ids),
+            )
 
     hass.services.async_register(
         DOMAIN,

@@ -303,12 +303,14 @@ class AdaptiveTPIHandler:
         """Reset the runtime learning state and purge any persisted snapshot."""
         t = self._thermostat
         if t.prop_algorithm is None or not hasattr(t.prop_algorithm, "reset_learning"):
+            _LOGGER.warning("%s - Adaptive TPI reset_learning ignored: no active algorithm", t)
             return
 
         t.prop_algorithm.reset_learning()
         await self._async_delete_persisted_state()
         self.update_attributes()
         t.async_write_ha_state()
+        _LOGGER.info("%s - Adaptive TPI learning state has been reset", t)
 
     async def _async_delete_persisted_state(self) -> None:
         """Delete the persisted snapshot file for this thermostat, if present."""
