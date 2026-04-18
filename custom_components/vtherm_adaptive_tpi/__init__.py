@@ -80,7 +80,7 @@ def _register_services(hass: HomeAssistant) -> None:
         return
 
     async def _call_on_vtherms(call, method_name: str) -> None:
-        entity_ids = set(service_helper.async_extract_entity_ids(hass, call))
+        entity_ids = set(await service_helper.async_extract_entity_ids(call))
 
         call_target = getattr(call, "target", None)
         if isinstance(call_target, dict):
@@ -167,10 +167,14 @@ def _register_services(hass: HomeAssistant) -> None:
                 sorted(entity_ids),
             )
 
+    async def _handle_reset_learning(call) -> None:
+        """Handle the Adaptive TPI reset service with a real async callable."""
+        await _call_on_vtherms(call, "service_reset_learning")
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_RESET_LEARNING,
-        lambda call: _call_on_vtherms(call, "service_reset_learning"),
+        _handle_reset_learning,
     )
     data[DATA_SERVICES_REGISTERED] = True
 
