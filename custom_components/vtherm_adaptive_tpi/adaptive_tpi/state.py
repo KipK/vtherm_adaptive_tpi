@@ -84,3 +84,22 @@ class AdaptiveTPIState:
         bootstrap_phase = _coerce_bootstrap_phase(data.get("bootstrap_phase"))
         if bootstrap_phase is not None:
             self.bootstrap_phase = bootstrap_phase
+
+    def reset_confidences(self) -> None:
+        """Reset adaptive confidences and transient trust markers."""
+        self.c_nd = 0.0
+        self.c_a = 0.0
+        self.c_b = 0.0
+        self.deadtime_locked = False
+        self.deadtime_candidate_costs = {}
+        self.deadtime_best_candidate = None
+        self.deadtime_second_best_candidate = None
+
+    def decay_confidences(self, factor: float) -> None:
+        """Decay the stored confidences by a bounded multiplicative factor."""
+        bounded_factor = min(max(factor, 0.0), 1.0)
+        self.c_nd *= bounded_factor
+        self.c_a *= bounded_factor
+        self.c_b *= bounded_factor
+        if self.c_nd < 0.6:
+            self.deadtime_locked = False

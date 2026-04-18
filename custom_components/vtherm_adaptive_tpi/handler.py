@@ -202,7 +202,13 @@ class AdaptiveTPIHandler:
             )
             return
 
-        t.prop_algorithm.load_state(state_data)
+        t.prop_algorithm.load_state(
+            state_data,
+            current_cycle_min=float(t.cycle_min),
+            persisted_cycle_min=data.get("cycle_min"),
+            last_accepted_at=data.get("last_accepted_at"),
+            saved_at=data.get("saved_at"),
+        )
 
     async def _async_save_persisted_state(self) -> None:
         """Save the minimal adaptive state required across reloads."""
@@ -210,8 +216,13 @@ class AdaptiveTPIHandler:
         if t.prop_algorithm is None:
             return
 
+        metadata = {}
+        if hasattr(t.prop_algorithm, "persistence_metadata"):
+            metadata = t.prop_algorithm.persistence_metadata(cycle_min=float(t.cycle_min))
+
         payload = {
             "schema_version": PERSISTENCE_SCHEMA_VERSION,
+            **metadata,
             "state": t.prop_algorithm.save_state(),
         }
         await self._store.async_save(payload)

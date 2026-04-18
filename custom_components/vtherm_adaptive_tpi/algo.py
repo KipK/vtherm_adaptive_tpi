@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from .adaptive_tpi.controller import compute_on_percent, project_gains
@@ -10,10 +11,12 @@ from .adaptive_tpi.deadtime import DeadtimeModel, DeadtimeObservation
 from .adaptive_tpi.diagnostics import build_diagnostics
 from .adaptive_tpi.estimator import ParameterEstimator, build_estimator_sample
 from .adaptive_tpi.state import AdaptiveTPIState
-from .adaptive_tpi.supervisor import AdaptiveTPISupervisor
+from .adaptive_tpi.supervisor import AdaptiveTPISupervisor, PHASE_A, PHASE_B
 from .const import DEFAULT_KEXT, DEFAULT_KINT
 
 _LOGGER = logging.getLogger(__name__)
+_CONFIDENCE_DECAY_30_DAYS = 30
+_CONFIDENCE_DECAY_90_DAYS = 90
 
 
 class AdaptiveTPIAlgorithm:
@@ -38,6 +41,7 @@ class AdaptiveTPIAlgorithm:
         self._estimator = ParameterEstimator()
         self._state.a_hat = self._estimator.a_hat
         self._state.b_hat = self._estimator.b_hat
+        self._last_accepted_at: datetime | None = None
         self._temperature_available = False
 
     def calculate(
@@ -67,6 +71,7 @@ class AdaptiveTPIAlgorithm:
         self._supervisor.apply_to_state(self._state)
 
         if decision.classification == "accepted" and ext_current_temp is not None and target_temp is not None and current_temp is not None:
+            self._last_accepted_at = datetime.now(timezone.utc)
             self._state.valid_cycles_count += 1
             deadtime_result = self._deadtime_model.record_accepted_observation(
                 DeadtimeObservation(
@@ -156,12 +161,37 @@ class AdaptiveTPIAlgorithm:
         """Return a persistable algorithm snapshot."""
         return self._state.to_persisted_dict()
 
-    def load_state(self, data: Mapping[str, Any] | None) -> None:
+    def persistence_metadata(self, *, cycle_min: float) -> dict[str, Any]:
+        """Return the persistence metadata required for safe warm starts."""
+        return {
+            "cycle_min": cycle_min,
+            "saved_at": self._utc_now().isoformat(),
+            "last_accepted_at": (
+                self._last_accepted_at.isoformat() if self._last_accepted_at is not None else None
+            ),
+        }
+
+    def load_state(
+        self,
+        data: Mapping[str, Any] | None,
+        *,
+        current_cycle_min: float | None = None,
+        persisted_cycle_min: float | None = None,
+        last_accepted_at: str | None = None,
+        saved_at: str | None = None,
+    ) -> None:
         """Load a persistable algorithm snapshot."""
         if not data:
             return
         try:
             self._state.apply_persisted_dict(data)
+            self._last_accepted_at = self._parse_datetime(last_accepted_at)
+            self._apply_persistence_invalidation(
+                current_cycle_min=current_cycle_min,
+                persisted_cycle_min=persisted_cycle_min,
+                saved_at=saved_at,
+                last_accepted_at=last_accepted_at,
+            )
             self._estimator.restore(
                 a_hat=self._state.a_hat,
                 b_hat=self._state.b_hat,
@@ -212,3 +242,65 @@ class AdaptiveTPIAlgorithm:
     def calculated_on_percent(self) -> float:
         """Return the raw calculated heating fraction."""
         return self._state.calculated_on_percent
+
+    def _apply_persistence_invalidation(
+        self,
+        *,
+        current_cycle_min: float | None,
+        persisted_cycle_min: float | None,
+        saved_at: str | None,
+        last_accepted_at: str | None,
+    ) -> None:
+        """Adjust persisted trust depending on runtime context changes."""
+        if (
+            isinstance(current_cycle_min, (int, float))
+            and isinstance(persisted_cycle_min, (int, float))
+            and persisted_cycle_min > 0
+            and current_cycle_min > 0
+            and abs(current_cycle_min - persisted_cycle_min) > 1e-9
+        ):
+            ratio = current_cycle_min / persisted_cycle_min
+            self._state.a_hat = max(1e-3, self._state.a_hat * ratio)
+            self._state.b_hat = max(0.0, self._state.b_hat * ratio)
+            self._state.reset_confidences()
+            self._state.bootstrap_phase = PHASE_A
+            self._supervisor.set_phase(PHASE_A)
+            self._supervisor.last_freeze_reason = "cycle_min_changed_revalidation"
+            self._state.last_freeze_reason = self._supervisor.last_freeze_reason
+            return
+
+        reference_time = self._parse_datetime(last_accepted_at) or self._parse_datetime(saved_at)
+        if reference_time is None:
+            return
+
+        age_days = (self._utc_now() - reference_time).days
+        if age_days > _CONFIDENCE_DECAY_90_DAYS:
+            self._state.reset_confidences()
+            self._state.bootstrap_phase = PHASE_A
+            self._supervisor.set_phase(PHASE_A)
+            self._supervisor.last_freeze_reason = "warm_start_revalidation_required"
+            self._state.last_freeze_reason = self._supervisor.last_freeze_reason
+            return
+
+        if age_days > _CONFIDENCE_DECAY_30_DAYS:
+            self._state.decay_confidences(0.5)
+            if not self._state.deadtime_locked:
+                self._state.bootstrap_phase = PHASE_B
+                self._supervisor.set_phase(PHASE_B)
+            self._supervisor.last_freeze_reason = "warm_start_confidence_decay"
+            self._state.last_freeze_reason = self._supervisor.last_freeze_reason
+
+    @staticmethod
+    def _parse_datetime(value: str | None) -> datetime | None:
+        """Parse an ISO datetime, tolerating invalid payloads."""
+        if not value or not isinstance(value, str):
+            return None
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _utc_now() -> datetime:
+        """Return the current timezone-aware UTC time."""
+        return datetime.now(timezone.utc)
