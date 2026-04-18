@@ -10,6 +10,7 @@ from custom_components.vtherm_adaptive_tpi.adaptive_tpi.controller import (
     project_gains,
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.deadtime import (
+    CycleHistoryEntry,
     DeadtimeModel,
     DeadtimeObservation,
 )
@@ -20,6 +21,7 @@ from custom_components.vtherm_adaptive_tpi.adaptive_tpi.estimator import (
     B_MIN,
     EstimatorSample,
     ParameterEstimator,
+    build_estimator_sample,
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.supervisor import (
     PHASE_A,
@@ -178,6 +180,78 @@ def test_estimator_updates_stay_bounded_under_extreme_samples() -> None:
         assert B_MIN <= update.b_hat <= B_MAX
         assert 0.0 <= update.c_a <= 1.0
         assert 0.0 <= update.c_b <= 1.0
+
+
+def test_deadtime_search_keeps_real_cycle_alignment_across_noninformative_gaps() -> None:
+    """Deadtime search must align delays on real cycles, not filtered observations."""
+    model = DeadtimeModel()
+    tin = 19.0
+    tout = 10.0
+    target = 21.0
+    powers = [0.0, 0.8, 0.0, 0.7, 0.0, 0.75, 0.0, 0.85, 0.0, 0.8, 0.0, 0.7]
+
+    for index, power in enumerate(powers):
+        result = model.record_cycle(
+            DeadtimeObservation(
+                tin=tin,
+                tout=tout,
+                target_temp=target,
+                applied_power=power,
+            ),
+            is_valid=True,
+            is_informative=(index % 2 == 0),
+        )
+        delayed_power = powers[index - 1] if index >= 1 else 0.0
+        tin += (0.35 * delayed_power) - (0.04 * (tin - tout))
+
+    assert result.nd_hat == pytest.approx(1.0)
+    assert result.best_candidate == pytest.approx(1.0)
+
+
+def test_estimator_sample_uses_real_delayed_cycle_across_gaps() -> None:
+    """Estimator alignment must use the real delayed cycle, not the previous informative one."""
+    sample = build_estimator_sample(
+        (
+            CycleHistoryEntry(
+                tin=19.0,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.8,
+                is_valid=True,
+                is_informative=True,
+            ),
+            CycleHistoryEntry(
+                tin=19.1,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.2,
+                is_valid=False,
+                is_informative=False,
+            ),
+            CycleHistoryEntry(
+                tin=19.2,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.7,
+                is_valid=True,
+                is_informative=True,
+            ),
+            CycleHistoryEntry(
+                tin=19.45,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+            ),
+        ),
+        nd_hat=1.0,
+        c_nd=0.7,
+    )
+
+    assert sample is not None
+    assert sample.u_del == pytest.approx(0.2)
+    assert sample.y == pytest.approx(0.25)
 
 
 def test_non_informative_cycle_skips_estimator_update() -> None:

@@ -33,6 +33,18 @@ class DeadtimeObservation:
 
 
 @dataclass(slots=True)
+class CycleHistoryEntry:
+    """One real scheduler cycle kept for temporal alignment."""
+
+    tin: float
+    tout: float
+    target_temp: float
+    applied_power: float
+    is_valid: bool
+    is_informative: bool
+
+
+@dataclass(slots=True)
 class DeadtimeCandidateScore:
     """Candidate deadtime score with its temporary constrained fit."""
 
@@ -62,7 +74,7 @@ class DeadtimeModel:
     def __init__(self, thermostat_class: str = THERMOSTAT_CLASS_UNKNOWN) -> None:
         """Initialize the deadtime search model."""
         self._thermostat_class = thermostat_class
-        self._accepted_observations: list[DeadtimeObservation] = []
+        self._cycle_history: list[CycleHistoryEntry] = []
         self._best_candidate_history: list[int] = []
         self.nd_hat = 0.0
         self.confidence = 0.0
@@ -80,16 +92,30 @@ class DeadtimeModel:
     @property
     def accepted_cycle_count(self) -> int:
         """Return the number of accepted observations tracked by the model."""
-        return len(self._accepted_observations)
+        return sum(1 for entry in self._cycle_history if entry.is_informative)
 
     @property
     def accepted_observations(self) -> tuple[DeadtimeObservation, ...]:
-        """Expose the accepted observations for downstream estimators."""
-        return tuple(self._accepted_observations)
+        """Expose the informative observations kept for backward-compatible callers."""
+        return tuple(
+            DeadtimeObservation(
+                tin=entry.tin,
+                tout=entry.tout,
+                target_temp=entry.target_temp,
+                applied_power=entry.applied_power,
+            )
+            for entry in self._cycle_history
+            if entry.is_informative
+        )
+
+    @property
+    def cycle_history(self) -> tuple[CycleHistoryEntry, ...]:
+        """Expose the complete cycle history for temporally aligned learning."""
+        return tuple(self._cycle_history)
 
     def reset(self) -> None:
         """Reset the deadtime state."""
-        self._accepted_observations.clear()
+        self._cycle_history.clear()
         self._best_candidate_history.clear()
         self.nd_hat = 0.0
         self.confidence = 0.0
@@ -109,11 +135,38 @@ class DeadtimeModel:
         observation: DeadtimeObservation,
     ) -> DeadtimeSearchResult:
         """Append an accepted observation and recompute coarse deadtime scores."""
-        self._accepted_observations.append(observation)
-        self.last_result = self.evaluate()
+        self.last_result = self.record_cycle(
+            observation,
+            is_valid=True,
+            is_informative=True,
+        )
         return self.last_result
 
-    def evaluate(self) -> DeadtimeSearchResult:
+    def record_cycle(
+        self,
+        observation: DeadtimeObservation,
+        *,
+        is_valid: bool,
+        is_informative: bool,
+    ) -> DeadtimeSearchResult:
+        """Append one real cycle while preserving temporal alignment."""
+        previous_entry = self._cycle_history[-1] if self._cycle_history else None
+        self._cycle_history.append(
+            CycleHistoryEntry(
+                tin=observation.tin,
+                tout=observation.tout,
+                target_temp=observation.target_temp,
+                applied_power=observation.applied_power,
+                is_valid=is_valid,
+                is_informative=is_informative,
+            )
+        )
+        self.last_result = self.evaluate(
+            track_winner=bool(is_valid and previous_entry is not None and previous_entry.is_informative)
+        )
+        return self.last_result
+
+    def evaluate(self, *, track_winner: bool = True) -> DeadtimeSearchResult:
         """Evaluate the candidate deadtime set over accepted observations."""
         scores = self._score_candidates()
         if not scores:
@@ -133,18 +186,19 @@ class DeadtimeModel:
         sorted_scores = sorted(scores, key=lambda score: score.cost)
         best_score = sorted_scores[0]
         second_score = sorted_scores[1] if len(sorted_scores) > 1 else None
-        self._best_candidate_history.append(best_score.candidate)
+        if track_winner:
+            self._best_candidate_history.append(best_score.candidate)
 
         ratio = self._dominance_ratio(best_score.cost, second_score.cost if second_score else None)
         consistency_all = self._consistency_score(best_score.candidate)
         recent_best_count = self._recent_best_count(best_score.candidate)
         confidence = self._compute_confidence(
-            accepted_cycle_count=len(self._accepted_observations),
+            accepted_cycle_count=self.accepted_cycle_count,
             ratio=ratio,
             consistency_all=consistency_all,
         )
         lock_reason = self._lock_reason(
-            accepted_cycle_count=len(self._accepted_observations),
+            accepted_cycle_count=self.accepted_cycle_count,
             ratio=ratio,
             recent_best_count=recent_best_count,
         )
@@ -200,11 +254,13 @@ class DeadtimeModel:
 
     def _candidate_rows(self, candidate: int) -> list[tuple[float, float, float]]:
         """Build the regression rows for one candidate deadtime."""
-        observations = self._accepted_observations
+        observations = self._cycle_history
         rows: list[tuple[float, float, float]] = []
         for index in range(candidate, len(observations) - 1):
             current = observations[index]
             next_observation = observations[index + 1]
+            if not current.is_informative or not next_observation.is_valid:
+                continue
             delayed_source = observations[index - candidate]
             delta_tin = next_observation.tin - current.tin
             loss_term = -(current.tin - current.tout)

@@ -159,6 +159,7 @@ class AdaptiveTPIAlgorithm:
             return
 
         if elapsed_ratio < 1.0:
+            self._record_cycle_history(pending_cycle, is_valid=False, is_informative=False)
             self.reject_cycle("cycle_interrupted")
             return
 
@@ -171,6 +172,7 @@ class AdaptiveTPIAlgorithm:
         )
         self._supervisor.apply_to_state(self._state)
         if decision.classification != "accepted":
+            self._record_cycle_history(pending_cycle, is_valid=False, is_informative=False)
             return
 
         self._last_accepted_at = self._utc_now()
@@ -180,6 +182,7 @@ class AdaptiveTPIAlgorithm:
             self._state.cycle_min_at_last_accepted_cycle = float(cycle_duration_min)
 
         if not self._is_deadtime_informative_cycle(pending_cycle):
+            self._record_cycle_history(pending_cycle, is_valid=True, is_informative=False)
             self._increment_hours_without_excitation(cycle_duration_min)
             self._supervisor.finalize_non_informative_cycle()
             self._supervisor.update_phase_progression(
@@ -191,13 +194,11 @@ class AdaptiveTPIAlgorithm:
             return
 
         self._state.hours_without_excitation = 0.0
-        deadtime_result = self._deadtime_model.record_accepted_observation(
-            DeadtimeObservation(
-                tin=pending_cycle.current_temp,
-                tout=pending_cycle.outdoor_temp,
-                target_temp=pending_cycle.target_temp,
-                applied_power=self._state.on_percent,
-            )
+        self._state.informative_deadtime_cycles_count += 1
+        deadtime_result = self._deadtime_model.record_cycle(
+            self._make_deadtime_observation(pending_cycle),
+            is_valid=True,
+            is_informative=True,
         )
         self._state.nd_hat = deadtime_result.nd_hat
         self._state.c_nd = deadtime_result.c_nd
@@ -205,15 +206,13 @@ class AdaptiveTPIAlgorithm:
         self._state.deadtime_best_candidate = deadtime_result.best_candidate
         self._state.deadtime_second_best_candidate = deadtime_result.second_best_candidate
         self._state.deadtime_candidate_costs = deadtime_result.candidate_costs
-        if deadtime_result.candidate_costs:
-            self._state.informative_deadtime_cycles_count += 1
         self._supervisor.apply_deadtime_result(
             locked=deadtime_result.locked,
             confidence=deadtime_result.c_nd,
             lock_reason=deadtime_result.lock_reason,
         )
         estimator_sample = build_estimator_sample(
-            self._deadtime_model.accepted_observations,
+            self._deadtime_model.cycle_history,
             nd_hat=self._state.nd_hat,
             c_nd=self._state.c_nd,
         )
@@ -433,6 +432,29 @@ class AdaptiveTPIAlgorithm:
         """Track how long learning has been starved of informative cycles."""
         if isinstance(cycle_duration_min, (int, float)) and cycle_duration_min > 0:
             self._state.hours_without_excitation += float(cycle_duration_min) / 60.0
+
+    def _make_deadtime_observation(self, sample: CycleSample) -> DeadtimeObservation:
+        """Convert one committed scheduler cycle into a learning observation."""
+        return DeadtimeObservation(
+            tin=sample.current_temp,
+            tout=sample.outdoor_temp,
+            target_temp=sample.target_temp,
+            applied_power=self._state.on_percent,
+        )
+
+    def _record_cycle_history(
+        self,
+        sample: CycleSample,
+        *,
+        is_valid: bool,
+        is_informative: bool,
+    ) -> None:
+        """Append one real cycle to the temporal history used by identification."""
+        self._deadtime_model.record_cycle(
+            self._make_deadtime_observation(sample),
+            is_valid=is_valid,
+            is_informative=is_informative,
+        )
 
     def _refresh_projected_gains(self) -> None:
         """Update controller gains only on learning boundaries, not sensor refreshes."""

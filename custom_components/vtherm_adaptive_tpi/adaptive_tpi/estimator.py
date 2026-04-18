@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import exp, floor
 
-from .deadtime import DeadtimeObservation
+from .deadtime import CycleHistoryEntry
 
 MU0 = 0.08
 EPS0 = 1e-4
@@ -57,18 +57,30 @@ class EstimatorUpdate:
 
 
 def build_estimator_sample(
-    observations: tuple[DeadtimeObservation, ...],
+    observations: tuple[CycleHistoryEntry, ...],
     *,
     nd_hat: float,
     c_nd: float,
 ) -> EstimatorSample | None:
-    """Build the latest aligned estimator sample from accepted observations."""
+    """Build the latest aligned estimator sample from the full cycle history."""
     if len(observations) < 2:
         return None
 
-    current_index = len(observations) - 2
-    delayed_index = current_index - floor(max(nd_hat, 0.0))
-    if delayed_index < 0:
+    current_index = None
+    delayed_index = None
+    for candidate_index in range(len(observations) - 2, -1, -1):
+        if not observations[candidate_index].is_informative:
+            continue
+        if not observations[candidate_index + 1].is_valid:
+            continue
+        aligned_delayed_index = candidate_index - floor(max(nd_hat, 0.0))
+        if aligned_delayed_index < 0:
+            continue
+        current_index = candidate_index
+        delayed_index = aligned_delayed_index
+        break
+
+    if current_index is None or delayed_index is None:
         return None
 
     current = observations[current_index]
