@@ -100,6 +100,9 @@ class AdaptiveTPIState:
     deadtime_locked: bool = False
     deadtime_best_candidate: float | None = None
     deadtime_second_best_candidate: float | None = None
+    deadtime_b_proxy: float | None = None
+    b_crosscheck_error: float | None = None
+    b_methods_consistent: bool = False
     deadtime_candidate_costs: dict[str, float] = field(default_factory=dict)
 
     def to_persisted_dict(self) -> dict[str, Any]:
@@ -138,6 +141,9 @@ class AdaptiveTPIState:
             "deadtime_locked": self.deadtime_locked,
             "deadtime_best_candidate": self.deadtime_best_candidate,
             "deadtime_second_best_candidate": self.deadtime_second_best_candidate,
+            "deadtime_b_proxy": self.deadtime_b_proxy,
+            "b_crosscheck_error": self.b_crosscheck_error,
+            "b_methods_consistent": self.b_methods_consistent,
             "deadtime_candidate_costs": dict(self.deadtime_candidate_costs),
             "last_freeze_reason": self.last_freeze_reason,
         }
@@ -161,6 +167,8 @@ class AdaptiveTPIState:
             "cycle_min_at_last_accepted_cycle",
             "deadtime_best_candidate",
             "deadtime_second_best_candidate",
+            "deadtime_b_proxy",
+            "b_crosscheck_error",
         )
         for field_name in float_fields:
             value = _coerce_float(data.get(field_name))
@@ -191,6 +199,8 @@ class AdaptiveTPIState:
 
         if isinstance(data.get("b_converged"), bool):
             self.b_converged = data["b_converged"]
+        if isinstance(data.get("b_methods_consistent"), bool):
+            self.b_methods_consistent = data["b_methods_consistent"]
 
         candidate_costs = _coerce_str_float_dict(data.get("deadtime_candidate_costs"))
         if candidate_costs is not None:
@@ -221,6 +231,9 @@ class AdaptiveTPIState:
         self.deadtime_candidate_costs = {}
         self.deadtime_best_candidate = None
         self.deadtime_second_best_candidate = None
+        self.deadtime_b_proxy = None
+        self.b_crosscheck_error = None
+        self.b_methods_consistent = False
 
     def decay_confidences(self, factor: float) -> None:
         """Decay the stored confidences by a bounded multiplicative factor."""

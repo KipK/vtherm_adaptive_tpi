@@ -138,6 +138,7 @@ def test_deadtime_lock_success_after_consistent_accepted_cycles() -> None:
     assert result.lock_reason is None
     assert result.nd_hat == pytest.approx(1.0)
     assert result.best_candidate == pytest.approx(1.0)
+    assert result.best_candidate_b is not None
     assert result.c_nd >= 0.6
 
 
@@ -196,6 +197,18 @@ def test_estimator_updates_stay_bounded_under_extreme_samples() -> None:
         assert B_MIN <= update.b_hat <= B_MAX
         assert 0.0 <= update.c_a <= 1.0
         assert 0.0 <= update.c_b <= 1.0
+
+
+def test_estimator_can_seed_b_from_deadtime_proxy() -> None:
+    """A deadtime-side `b` proxy may bootstrap the explicit estimator once."""
+    estimator = ParameterEstimator()
+
+    update = estimator.seed_b_from_deadtime_proxy(0.03)
+
+    assert update.b_hat == pytest.approx(0.03)
+    assert update.b_samples_count == 1
+    assert update.b_last_reason == "b_seeded_from_deadtime"
+    assert update.i_b == pytest.approx(0.0)
 
 
 def test_deadtime_search_keeps_real_cycle_alignment_across_noninformative_gaps() -> None:
@@ -745,9 +758,27 @@ def test_gain_projection_matches_structural_formulas() -> None:
         c_a=0.8,
         c_b=0.8,
     )
-
     assert next_k_int == pytest.approx(0.23)
     assert next_k_ext == pytest.approx(0.015)
+
+
+def test_algo_exposes_deadtime_b_proxy_and_crosscheck_after_bootstrap_seed() -> None:
+    """The runtime should surface the deadtime-side `b` proxy and seed `b_hat` from it."""
+    algo = AdaptiveTPIAlgorithm(name="test-deadtime-b-proxy")
+
+    for observation in _make_deadtime_lock_sequence():
+        algo._deadtime_model.record_accepted_observation(observation)
+
+    result = algo._deadtime_model.evaluate()
+    algo._state.deadtime_b_proxy = result.best_candidate_b
+    algo._apply_estimator_update(algo._estimator.seed_b_from_deadtime_proxy(result.best_candidate_b))
+    algo._refresh_b_crosscheck()
+
+    diagnostics = algo.get_diagnostics()
+    assert diagnostics["deadtime_b_proxy"] == pytest.approx(result.best_candidate_b)
+    assert diagnostics["b_hat"] == pytest.approx(result.best_candidate_b)
+    assert diagnostics["b_crosscheck_error"] == pytest.approx(0.0)
+    assert diagnostics["b_methods_consistent"] is True
 
 
 def test_gain_projection_keeps_bootstrap_defaults_while_confidence_is_low() -> None:

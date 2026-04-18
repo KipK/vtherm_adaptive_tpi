@@ -189,6 +189,27 @@ class ParameterEstimator:
         updated = True
         return self._snapshot(i_a=0.0, i_b=1.0, a_updated=False, b_updated=updated)
 
+    def seed_b_from_deadtime_proxy(
+        self,
+        measurement: float | None,
+        *,
+        reason: str = "b_seeded_from_deadtime",
+    ) -> EstimatorUpdate:
+        """Bootstrap `b` once from the deadtime-side proxy when no OFF sample exists yet."""
+        if measurement is None:
+            self._b_estimator.last_reason = "b_deadtime_proxy_missing"
+            return self._snapshot(i_a=0.0, i_b=0.0, a_updated=False, b_updated=False)
+        if self._b_estimator.samples_count > 0:
+            self._b_estimator.last_reason = "b_deadtime_seed_skipped_existing_samples"
+            return self._snapshot(i_a=0.0, i_b=0.0, a_updated=False, b_updated=False)
+
+        self._b_estimator.push(measurement)
+        self._b_estimator.last_reason = reason
+        self.b_hat = self._b_estimator.estimate
+        self.c_b = self._b_estimator.confidence
+        self.b_converged = self._compute_b_converged()
+        return self._snapshot(i_a=0.0, i_b=0.0, a_updated=False, b_updated=False)
+
     def update_a(self, sample: ASample | None, reason: str = "a_sample_missing") -> EstimatorUpdate:
         """Update the heating authority estimator only."""
         if sample is None:

@@ -29,6 +29,8 @@ _MIN_DEADTIME_APPLIED_POWER = 0.15
 _MAX_DEADTIME_APPLIED_POWER = 0.85
 _MIN_ESTIMATOR_SETPOINT_ERROR = 0.2
 _MIN_ESTIMATOR_OUTDOOR_DELTA = 1.0
+_DEADTIME_B_PROXY_SEED_CONFIDENCE = 0.2
+_B_METHODS_CONSISTENT_THRESHOLD = 0.35
 
 
 @dataclass(slots=True)
@@ -248,12 +250,21 @@ class AdaptiveTPIAlgorithm:
         self._state.deadtime_locked = deadtime_result.locked
         self._state.deadtime_best_candidate = deadtime_result.best_candidate
         self._state.deadtime_second_best_candidate = deadtime_result.second_best_candidate
+        self._state.deadtime_b_proxy = deadtime_result.best_candidate_b
         self._state.deadtime_candidate_costs = deadtime_result.candidate_costs
         self._supervisor.apply_deadtime_result(
             locked=deadtime_result.locked,
             confidence=deadtime_result.c_nd,
             lock_reason=deadtime_result.lock_reason,
         )
+        if (
+            self._state.b_samples_count == 0
+            and deadtime_result.best_candidate_b is not None
+            and deadtime_result.c_nd >= _DEADTIME_B_PROXY_SEED_CONFIDENCE
+        ):
+            self._apply_estimator_update(
+                self._estimator.seed_b_from_deadtime_proxy(deadtime_result.best_candidate_b)
+            )
         estimator_updated = False
         off_window = build_learning_window(
             self._deadtime_model.cycle_history,
@@ -311,19 +322,7 @@ class AdaptiveTPIAlgorithm:
             self._state.b_last_reason = off_window.reason
 
         if estimator_update is not None:
-            self._state.a_hat = estimator_update.a_hat
-            self._state.b_hat = estimator_update.b_hat
-            self._state.c_a = estimator_update.c_a
-            self._state.c_b = estimator_update.c_b
-            self._state.b_converged = estimator_update.b_converged
-            self._state.i_a = estimator_update.i_a
-            self._state.i_b = estimator_update.i_b
-            self._state.a_samples_count = estimator_update.a_samples_count
-            self._state.b_samples_count = estimator_update.b_samples_count
-            self._state.a_last_reason = estimator_update.a_last_reason
-            self._state.b_last_reason = estimator_update.b_last_reason
-            self._state.a_dispersion = estimator_update.a_dispersion
-            self._state.b_dispersion = estimator_update.b_dispersion
+            self._apply_estimator_update(estimator_update)
             self._state.last_learning_attempt_reason = (
                 estimator_update.b_last_reason
                 if estimator_update.b_updated
@@ -334,6 +333,7 @@ class AdaptiveTPIAlgorithm:
             self._state.last_learning_attempt_reason = off_window.reason
             self._state.last_learning_attempt_regime = None
             self._supervisor.finalize_non_informative_cycle()
+        self._refresh_b_crosscheck()
         self._supervisor.update_phase_progression(
             self._state,
             deadtime_costs_available=bool(deadtime_result.candidate_costs),
@@ -438,6 +438,35 @@ class AdaptiveTPIAlgorithm:
         """Record an accepted cycle through the supervisor."""
         self._supervisor.accept_cycle()
         self._supervisor.apply_to_state(self._state)
+
+    def _apply_estimator_update(self, estimator_update) -> None:
+        """Copy one estimator snapshot into the public adaptive state."""
+        self._state.a_hat = estimator_update.a_hat
+        self._state.b_hat = estimator_update.b_hat
+        self._state.c_a = estimator_update.c_a
+        self._state.c_b = estimator_update.c_b
+        self._state.b_converged = estimator_update.b_converged
+        self._state.i_a = estimator_update.i_a
+        self._state.i_b = estimator_update.i_b
+        self._state.a_samples_count = estimator_update.a_samples_count
+        self._state.b_samples_count = estimator_update.b_samples_count
+        self._state.a_last_reason = estimator_update.a_last_reason
+        self._state.b_last_reason = estimator_update.b_last_reason
+        self._state.a_dispersion = estimator_update.a_dispersion
+        self._state.b_dispersion = estimator_update.b_dispersion
+
+    def _refresh_b_crosscheck(self) -> None:
+        """Update diagnostics that compare the two independent `b` estimates."""
+        proxy = self._state.deadtime_b_proxy
+        if proxy is None or self._state.b_samples_count <= 0:
+            self._state.b_crosscheck_error = None
+            self._state.b_methods_consistent = False
+            return
+
+        scale = max(abs(proxy), abs(self._state.b_hat), 1e-6)
+        error = abs(self._state.b_hat - proxy) / scale
+        self._state.b_crosscheck_error = error
+        self._state.b_methods_consistent = error <= _B_METHODS_CONSISTENT_THRESHOLD
 
     @property
     def on_percent(self) -> float | None:

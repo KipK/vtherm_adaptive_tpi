@@ -66,6 +66,8 @@ class DeadtimeSearchResult:
     locked: bool
     best_candidate: float | None
     second_best_candidate: float | None
+    best_candidate_a: float | None
+    best_candidate_b: float | None
     candidate_costs: dict[str, float]
     lock_reason: str | None
 
@@ -87,6 +89,8 @@ class DeadtimeModel:
             locked=False,
             best_candidate=None,
             second_best_candidate=None,
+            best_candidate_a=None,
+            best_candidate_b=None,
             candidate_costs={},
             lock_reason="insufficient_data",
         )
@@ -185,6 +189,8 @@ class DeadtimeModel:
                 locked=False,
                 best_candidate=None,
                 second_best_candidate=None,
+                best_candidate_a=None,
+                best_candidate_b=None,
                 candidate_costs={},
                 lock_reason="insufficient_data",
             )
@@ -220,6 +226,8 @@ class DeadtimeModel:
             locked=locked,
             best_candidate=float(best_score.candidate),
             second_best_candidate=(float(second_score.candidate) if second_score else None),
+            best_candidate_a=best_score.a_c,
+            best_candidate_b=best_score.b_c,
             candidate_costs={str(score.candidate): score.cost for score in sorted_scores},
             lock_reason=lock_reason,
         )
