@@ -117,7 +117,7 @@ def project_gains(
         c_b=c_b,
     )
     if structural_weight <= 0.0:
-        return DEFAULT_KINT, DEFAULT_KEXT
+        return k_int, k_ext
 
     delta_kint_max, delta_kext_max = PHASE_GAIN_RATE_LIMITS[phase]
     k_int_target, k_ext_target = compute_gain_targets(
