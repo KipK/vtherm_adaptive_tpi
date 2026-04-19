@@ -10,8 +10,6 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
     data = {
         "bootstrap_phase": state.bootstrap_phase,
         "phase": state.bootstrap_phase,
-        "Kint": state.k_int,
-        "Kext": state.k_ext,
         "k_int": state.k_int,
         "k_ext": state.k_ext,
         "nd_hat": state.nd_hat,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import floor
+from math import ceil, floor
 
 from .deadtime import CycleHistoryEntry
 
@@ -72,12 +72,6 @@ def build_learning_window(
         previous = observations[start_index - 1]
         if not previous.is_estimator_informative or not _matches_regime(previous, regime):
             break
-        if _has_setpoint_jump(previous, observations[start_index]):
-            return LearningWindowResult(
-                sample=None,
-                reason=f"{regime}_window_setpoint_changed",
-                waiting_next_cycle=False,
-            )
         next_duration = total_duration_min + _duration_minutes(previous)
         if next_duration > MAX_WINDOW_DURATION_MIN:
             break
@@ -85,13 +79,13 @@ def build_learning_window(
         total_duration_min = next_duration
         cycle_count += 1
 
-    if _has_setpoint_jump(observations[end_index], end_observation := observations[end_index + 1]):
-        return LearningWindowResult(
-            sample=None,
-            reason=f"{regime}_window_setpoint_changed",
-            waiting_next_cycle=False,
-        )
-    if start_index > 0 and _has_setpoint_jump(observations[start_index - 1], observations[start_index]):
+    end_observation = observations[end_index + 1]
+    if _window_touches_recent_setpoint_jump(
+        observations,
+        start_index=start_index,
+        end_index=end_index,
+        guard_cycles=_setpoint_guard_cycles(nd_hat),
+    ):
         return LearningWindowResult(
             sample=None,
             reason=f"{regime}_window_setpoint_changed",
@@ -193,3 +187,27 @@ def _duration_minutes(entry: CycleHistoryEntry) -> float:
 
 def _has_setpoint_jump(left: CycleHistoryEntry, right: CycleHistoryEntry) -> bool:
     return abs(left.target_temp - right.target_temp) > MAX_SETPOINT_JUMP
+
+
+def _setpoint_guard_cycles(nd_hat: float) -> int:
+    """Return the post-setpoint-change learning blackout in cycles."""
+    return max(1, int(ceil(max(nd_hat, 0.0))))
+
+
+def _window_touches_recent_setpoint_jump(
+    observations: tuple[CycleHistoryEntry, ...],
+    *,
+    start_index: int,
+    end_index: int,
+    guard_cycles: int,
+) -> bool:
+    """Return True when the latest setpoint jump is still too close to the window."""
+    latest_jump_following_index: int | None = None
+    for index in range(0, end_index + 1):
+        if _has_setpoint_jump(observations[index], observations[index + 1]):
+            latest_jump_following_index = index + 1
+
+    if latest_jump_following_index is None:
+        return False
+
+    return start_index < (latest_jump_following_index + guard_cycles)

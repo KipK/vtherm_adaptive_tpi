@@ -87,8 +87,8 @@ def test_startup_with_no_history_keeps_bootstrap_defaults() -> None:
 
     assert diagnostics["bootstrap_phase"] == "startup"
     assert diagnostics["accepted_cycles_count"] == 0
-    assert diagnostics["Kint"] == pytest.approx(0.6)
-    assert diagnostics["Kext"] == pytest.approx(0.01)
+    assert diagnostics["k_int"] == pytest.approx(0.6)
+    assert diagnostics["k_ext"] == pytest.approx(0.01)
 
 
 def test_invalid_temperature_data_rejects_cycle_and_disables_output() -> None:
@@ -507,6 +507,59 @@ def test_learning_window_rejects_setpoint_jump_before_window_start() -> None:
     assert result.reason == "off_window_setpoint_changed"
 
 
+def test_learning_window_allows_one_safe_cycle_after_setpoint_jump_without_deadtime() -> None:
+    """Without a known deadtime, one full safety cycle after the jump should be enough."""
+    result = build_learning_window(
+        (
+            CycleHistoryEntry(
+                tin=20.2,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.7,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=20.0,
+                tout=10.0,
+                target_temp=20.4,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.7,
+                tout=10.0,
+                target_temp=20.4,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.35,
+                tout=10.0,
+                target_temp=20.4,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+        ),
+        nd_hat=0.0,
+        regime=WINDOW_REGIME_OFF,
+    )
+
+    assert result.sample is not None
+    assert result.reason == "off_window_ready"
+
+
 def test_learning_window_rejects_off_window_when_temperature_rises() -> None:
     """OFF windows with a positive thermal drift should be rejected explicitly."""
     result = build_learning_window(
@@ -822,8 +875,8 @@ def test_calculate_does_not_adapt_gains_on_sensor_refresh() -> None:
         )
 
     diagnostics = algo.get_diagnostics()
-    assert diagnostics["Kint"] == pytest.approx(0.72)
-    assert diagnostics["Kext"] == pytest.approx(0.04)
+    assert diagnostics["k_int"] == pytest.approx(0.72)
+    assert diagnostics["k_ext"] == pytest.approx(0.04)
 
 
 def test_reset_learning_restores_fresh_bootstrap_defaults() -> None:
@@ -845,8 +898,8 @@ def test_reset_learning_restores_fresh_bootstrap_defaults() -> None:
 
     diagnostics = algo.get_diagnostics()
     assert diagnostics["bootstrap_phase"] == "startup"
-    assert diagnostics["Kint"] == pytest.approx(0.6)
-    assert diagnostics["Kext"] == pytest.approx(0.01)
+    assert diagnostics["k_int"] == pytest.approx(0.6)
+    assert diagnostics["k_ext"] == pytest.approx(0.01)
     assert diagnostics["nd_hat"] == pytest.approx(0.0)
     assert diagnostics["c_nd"] == pytest.approx(0.0)
     assert diagnostics["a_hat"] == pytest.approx(0.001)
