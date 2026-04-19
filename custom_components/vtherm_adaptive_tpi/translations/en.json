@@ -2,13 +2,6 @@
   "title": "Versatile Thermostat Adaptive TPI",
   "config": {
     "step": {
-      "user": {
-        "title": "Adaptive TPI configuration",
-        "menu_options": {
-          "thermostat": "Configure a thermostat",
-          "global": "Configure global defaults"
-        }
-      },
       "global": {
         "title": "Adaptive TPI defaults",
         "data": {

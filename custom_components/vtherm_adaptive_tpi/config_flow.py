@@ -82,10 +82,7 @@ class AdaptiveTPIConfigFlow(ConfigFlow, domain=DOMAIN):
                 data=dict(DEFAULT_OPTIONS),
             )
 
-        return self.async_show_menu(
-            step_id="user",
-            menu_options=["thermostat", "global"],
-        )
+        return await self.async_step_thermostat(user_input)
 
     async def async_step_global(self, user_input: dict[str, Any] | None = None):
         """Handle the global defaults entry."""
