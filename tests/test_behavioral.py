@@ -96,6 +96,8 @@ def test_startup_with_no_history_keeps_bootstrap_defaults() -> None:
     assert diagnostics["deadtime_min"] is None
     assert diagnostics["a_hat_per_hour"] is None
     assert diagnostics["b_hat_per_hour"] is None
+    assert diagnostics["tau_h"] is None
+    assert diagnostics["tau_min"] is None
 
 
 def test_diagnostics_expose_normalized_units_when_cycle_duration_is_known() -> None:
@@ -113,6 +115,8 @@ def test_diagnostics_expose_normalized_units_when_cycle_duration_is_known() -> N
     assert diagnostics["deadtime_min"] == pytest.approx(10.0)
     assert diagnostics["a_hat_per_hour"] == pytest.approx(2.4)
     assert diagnostics["b_hat_per_hour"] == pytest.approx(0.36)
+    assert diagnostics["tau_h"] == pytest.approx(1.0 / 0.36)
+    assert diagnostics["tau_min"] == pytest.approx((1.0 / 0.36) * 60.0)
 
 
 def test_invalid_temperature_data_rejects_cycle_and_disables_output() -> None:
@@ -685,6 +689,71 @@ def test_learning_window_blocks_deadtime_after_regime_transition() -> None:
 def test_classify_cycle_regime_returns_mixed_for_mid_power() -> None:
     """Intermediate powers should be classified as mixed and not feed A/B directly."""
     assert classify_cycle_regime(0.18) == WINDOW_REGIME_MIXED
+
+
+def test_learning_window_does_not_restart_blackout_on_mixed_gap_inside_same_regime() -> None:
+    """A mixed cycle between two OFF cycles should not count as a fresh OFF transition."""
+    result = build_anchored_learning_window(
+        (
+            CycleHistoryEntry(
+                tin=20.4,
+                tout=10.0,
+                target_temp=20.0,
+                applied_power=0.7,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=20.2,
+                tout=10.0,
+                target_temp=20.0,
+                applied_power=0.05,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=20.0,
+                tout=10.0,
+                target_temp=20.0,
+                applied_power=0.18,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.8,
+                tout=10.0,
+                target_temp=20.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.6,
+                tout=10.0,
+                target_temp=20.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=False,
+                cycle_duration_min=4.0,
+            ),
+        ),
+        nd_hat=1.0,
+        regime=WINDOW_REGIME_OFF,
+        end_index=3,
+    )
+
+    assert result.sample is not None
+    assert result.reason == "off_window_ready"
+    assert result.deadtime_blackout_active is False
 
 
 def test_learning_window_rejects_off_window_when_temperature_rises() -> None:

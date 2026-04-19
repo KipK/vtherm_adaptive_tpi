@@ -335,17 +335,25 @@ def _safe_window_start_after_recent_regime_transition(
     regime: str,
     guard_cycles: int,
 ) -> tuple[int | None, bool]:
-    """Return the earliest safe index after the latest regime transition."""
-    latest_transition_following_index: int | None = None
-    for index in range(1, end_index + 1):
-        previous_regime = classify_cycle_regime(observations[index - 1].applied_power)
-        current_regime = classify_cycle_regime(observations[index].applied_power)
-        if current_regime == regime and previous_regime != regime:
-            latest_transition_following_index = index
+    """Return the earliest safe index after the latest effective ON/OFF transition."""
+    latest_target_index: int | None = None
+    latest_opposite_index: int | None = None
 
-    if latest_transition_following_index is None:
+    for index in range(end_index, -1, -1):
+        current_regime = classify_cycle_regime(observations[index].applied_power)
+        if current_regime == WINDOW_REGIME_MIXED:
+            continue
+        if current_regime == regime:
+            if latest_target_index is None:
+                latest_target_index = index
+            continue
+        latest_opposite_index = index
+        break
+
+    if latest_target_index is None or latest_opposite_index is None:
         return start_index, False
 
+    latest_transition_following_index = latest_opposite_index + 1
     safe_start_index = latest_transition_following_index + guard_cycles
     if start_index >= safe_start_index:
         return start_index, False
