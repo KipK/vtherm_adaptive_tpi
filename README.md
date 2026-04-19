@@ -130,20 +130,20 @@ This is normal for the current design.
 
 If you want to go deeper:
 
-- [docs/diagnostics.md](/workspaces/workspace/vtherm_adaptive_tpi/docs/diagnostics.md)  
+- [Diagnostics](vtherm_adaptive_tpi/docs/diagnostics.md)  
   User-facing runtime diagnostics and how to interpret them
-- [docs/architecture.md](/workspaces/workspace/vtherm_adaptive_tpi/docs/architecture.md)  
+- [Architecture](vtherm_adaptive_tpi/docs/architecture.md)  
   Internal architecture and learning flow
 
 ## Repository Layout
 
-- [custom_components/vtherm_adaptive_tpi](/workspaces/workspace/vtherm_adaptive_tpi/custom_components/vtherm_adaptive_tpi)  
+- [custom_components/vtherm_adaptive_tpi](vtherm_adaptive_tpi/custom_components/vtherm_adaptive_tpi)  
   Home Assistant integration and adaptive algorithm code
-- [docs](/workspaces/workspace/vtherm_adaptive_tpi/docs)  
+- [docs](vtherm_adaptive_tpi/docs)  
   Project documentation
-- [tests](/workspaces/workspace/vtherm_adaptive_tpi/tests)  
+- [tests](vtherm_adaptive_tpi/tests)  
   Behavioral tests for the prototype
-- [plans](/workspaces/workspace/vtherm_adaptive_tpi/plans)  
+- [plans](vtherm_adaptive_tpi/plans)  
   Design notes, mathematical specs, implementation plans, and review reports
 
 ## Development Notes
