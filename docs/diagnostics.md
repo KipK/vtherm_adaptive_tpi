@@ -74,6 +74,8 @@ Important:
 - `a_hat_per_hour`
 - `b_hat`
 - `b_hat_per_hour`
+- `tau_h`
+- `tau_min`
 - `c_a`
 - `c_b`
 - `b_converged`
@@ -84,6 +86,8 @@ Interpretation:
 - `a_hat_per_hour`: same quantity normalized to `°C/hour`
 - `b_hat`: learned thermal loss coefficient in `1/cycle`
 - `b_hat_per_hour`: same quantity normalized to `1/hour`
+- `tau_h`: thermal time constant derived from `b_hat_per_hour`, in hours
+- `tau_min`: same thermal time constant in minutes
 - `c_a`, `c_b`: confidence in these estimates
 - `b_converged`: whether `b` is stable enough to open learning for `a`
 

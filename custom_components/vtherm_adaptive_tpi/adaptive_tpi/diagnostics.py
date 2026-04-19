@@ -19,9 +19,19 @@ def _deadtime_min(nd_hat: float, cycle_min: float | None) -> float | None:
     return nd_hat * cycle_min
 
 
+def _tau_h(b_per_hour: float | None) -> float | None:
+    """Return the thermal time constant in hours when the loss rate is positive."""
+    if b_per_hour is None or b_per_hour <= 0:
+        return None
+    return 1.0 / b_per_hour
+
+
 def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
     """Build the stable diagnostics payload exposed by the algorithm."""
     cycle_min = state.cycle_min_at_last_accepted_cycle
+    a_per_hour = _per_hour(state.a_hat, cycle_min)
+    b_per_hour = _per_hour(state.b_hat, cycle_min)
+    tau_h = _tau_h(b_per_hour)
     data = {
         "bootstrap_phase": state.bootstrap_phase,
         "phase": state.bootstrap_phase,
@@ -32,9 +42,11 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
         "deadtime_min": _deadtime_min(state.nd_hat, cycle_min),
         "c_nd": state.c_nd,
         "a_hat": state.a_hat,
-        "a_hat_per_hour": _per_hour(state.a_hat, cycle_min),
+        "a_hat_per_hour": a_per_hour,
         "b_hat": state.b_hat,
-        "b_hat_per_hour": _per_hour(state.b_hat, cycle_min),
+        "b_hat_per_hour": b_per_hour,
+        "tau_h": tau_h,
+        "tau_min": (tau_h * 60.0) if tau_h is not None else None,
         "c_a": state.c_a,
         "c_b": state.c_b,
         "b_converged": state.b_converged,
