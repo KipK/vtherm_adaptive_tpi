@@ -16,8 +16,8 @@ jobs:
 
       - name: Create ZIP
         run: |
-          cd custom_components
-          zip -r ../vtherm_adaptive_tpi.zip vtherm_adaptive_tpi/
+          cd custom_components/vtherm_adaptive_tpi
+          zip -r ../../vtherm_adaptive_tpi.zip .
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
