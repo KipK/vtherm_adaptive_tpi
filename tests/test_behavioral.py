@@ -93,6 +93,26 @@ def test_startup_with_no_history_keeps_bootstrap_defaults() -> None:
     assert diagnostics["accepted_cycles_count"] == 0
     assert diagnostics["k_int"] == pytest.approx(0.6)
     assert diagnostics["k_ext"] == pytest.approx(0.01)
+    assert diagnostics["deadtime_min"] is None
+    assert diagnostics["a_hat_per_hour"] is None
+    assert diagnostics["b_hat_per_hour"] is None
+
+
+def test_diagnostics_expose_normalized_units_when_cycle_duration_is_known() -> None:
+    """Diagnostics should expose user-facing normalized units in addition to per-cycle values."""
+    algo = AdaptiveTPIAlgorithm(name="test-diag-units")
+    algo._state.nd_hat = 2.0
+    algo._state.a_hat = 0.2
+    algo._state.b_hat = 0.03
+    algo._state.cycle_min_at_last_accepted_cycle = 5.0
+
+    diagnostics = algo.get_diagnostics()
+
+    assert diagnostics["nd_hat"] == pytest.approx(2.0)
+    assert diagnostics["nd_hat_cycles"] == pytest.approx(2.0)
+    assert diagnostics["deadtime_min"] == pytest.approx(10.0)
+    assert diagnostics["a_hat_per_hour"] == pytest.approx(2.4)
+    assert diagnostics["b_hat_per_hour"] == pytest.approx(0.36)
 
 
 def test_invalid_temperature_data_rejects_cycle_and_disables_output() -> None:

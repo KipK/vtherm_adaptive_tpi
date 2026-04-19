@@ -51,6 +51,10 @@ These are the currently projected controller gains actually used by the plugin.
 
 - `nd_hat`
   Estimated deadtime in number of cycles
+- `nd_hat_cycles`
+  Explicit alias of `nd_hat`, also in number of cycles
+- `deadtime_min`
+  Deadtime converted into minutes using the last accepted cycle duration
 - `c_nd`
   Confidence in the deadtime estimate, in `[0, 1]`
 - `deadtime_candidate_costs`
@@ -61,20 +65,25 @@ These are the currently projected controller gains actually used by the plugin.
 Important:
 
 - `nd_hat` is expressed in cycles, not minutes
-- deadtime in minutes is roughly `nd_hat * cycle_min`
+- `deadtime_min` is the user-facing normalized deadtime in minutes
+- deadtime in minutes is computed as `nd_hat * cycle_min_at_last_accepted_cycle`
 
 ### Estimator state
 
 - `a_hat`
+- `a_hat_per_hour`
 - `b_hat`
+- `b_hat_per_hour`
 - `c_a`
 - `c_b`
 - `b_converged`
 
 Interpretation:
 
-- `a_hat`: learned heating authority
-- `b_hat`: learned thermal loss coefficient
+- `a_hat`: learned heating authority in `°C/cycle`
+- `a_hat_per_hour`: same quantity normalized to `°C/hour`
+- `b_hat`: learned thermal loss coefficient in `1/cycle`
+- `b_hat_per_hour`: same quantity normalized to `1/hour`
 - `c_a`, `c_b`: confidence in these estimates
 - `b_converged`: whether `b` is stable enough to open learning for `a`
 

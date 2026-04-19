@@ -5,17 +5,36 @@ from __future__ import annotations
 from .state import AdaptiveTPIState
 
 
+def _per_hour(value_per_cycle: float, cycle_min: float | None) -> float | None:
+    """Convert one per-cycle value into a per-hour diagnostic when possible."""
+    if cycle_min is None or cycle_min <= 0:
+        return None
+    return value_per_cycle * (60.0 / cycle_min)
+
+
+def _deadtime_min(nd_hat: float, cycle_min: float | None) -> float | None:
+    """Convert a deadtime expressed in cycles into minutes when possible."""
+    if cycle_min is None or cycle_min <= 0:
+        return None
+    return nd_hat * cycle_min
+
+
 def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
     """Build the stable diagnostics payload exposed by the algorithm."""
+    cycle_min = state.cycle_min_at_last_accepted_cycle
     data = {
         "bootstrap_phase": state.bootstrap_phase,
         "phase": state.bootstrap_phase,
         "k_int": state.k_int,
         "k_ext": state.k_ext,
         "nd_hat": state.nd_hat,
+        "nd_hat_cycles": state.nd_hat,
+        "deadtime_min": _deadtime_min(state.nd_hat, cycle_min),
         "c_nd": state.c_nd,
         "a_hat": state.a_hat,
+        "a_hat_per_hour": _per_hour(state.a_hat, cycle_min),
         "b_hat": state.b_hat,
+        "b_hat_per_hour": _per_hour(state.b_hat, cycle_min),
         "c_a": state.c_a,
         "c_b": state.c_b,
         "b_converged": state.b_converged,
