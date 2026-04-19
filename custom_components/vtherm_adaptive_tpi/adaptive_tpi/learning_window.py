@@ -9,6 +9,7 @@ from .deadtime import CycleHistoryEntry
 
 WINDOW_REGIME_OFF = "off"
 WINDOW_REGIME_ON = "on"
+WINDOW_REGIME_MIXED = "mixed"
 
 OFF_POWER_MAX = 0.10
 ON_POWER_MIN = 0.25
@@ -41,6 +42,16 @@ class LearningWindowResult:
     sample: LearningWindowSample | None
     reason: str
     waiting_next_cycle: bool
+    deadtime_blackout_active: bool = False
+
+
+def classify_cycle_regime(applied_power: float) -> str:
+    """Classify one cycle into the coarse learning regimes."""
+    if applied_power <= OFF_POWER_MAX:
+        return WINDOW_REGIME_OFF
+    if applied_power >= ON_POWER_MIN:
+        return WINDOW_REGIME_ON
+    return WINDOW_REGIME_MIXED
 
 
 def build_learning_window(
@@ -65,6 +76,53 @@ def build_learning_window(
             waiting_next_cycle=False,
         )
 
+    return build_anchored_learning_window(
+        observations,
+        nd_hat=nd_hat,
+        regime=regime,
+        end_index=end_index,
+    )
+
+
+def build_anchored_learning_window(
+    observations: tuple[CycleHistoryEntry, ...],
+    *,
+    nd_hat: float,
+    regime: str,
+    end_index: int,
+) -> LearningWindowResult:
+    """Build a bounded learning window anchored on one chosen cycle."""
+    if len(observations) < 2:
+        return LearningWindowResult(
+            sample=None,
+            reason="window_insufficient_history",
+            waiting_next_cycle=False,
+        )
+    if end_index < 0 or end_index >= len(observations) - 1:
+        return LearningWindowResult(
+            sample=None,
+            reason=f"{regime}_window_invalid_anchor",
+            waiting_next_cycle=False,
+        )
+    if not observations[end_index].is_estimator_informative:
+        return LearningWindowResult(
+            sample=None,
+            reason=f"{regime}_window_not_estimator_informative",
+            waiting_next_cycle=False,
+        )
+    if not _matches_regime(observations[end_index], regime):
+        return LearningWindowResult(
+            sample=None,
+            reason=f"{regime}_window_anchor_regime_mismatch",
+            waiting_next_cycle=False,
+        )
+    if not observations[end_index + 1].is_valid:
+        return LearningWindowResult(
+            sample=None,
+            reason=f"{regime}_window_missing_terminal_point",
+            waiting_next_cycle=False,
+        )
+
     start_index = end_index
     total_duration_min = _duration_minutes(observations[end_index])
     cycle_count = 1
@@ -84,6 +142,7 @@ def build_learning_window(
         start_index=start_index,
         end_index=end_index,
         guard_cycles=_setpoint_guard_cycles(nd_hat),
+        regime=regime,
     )
     if safe_start_index is None:
         return LearningWindowResult(
@@ -93,6 +152,26 @@ def build_learning_window(
         )
     if safe_start_index != start_index:
         start_index = safe_start_index
+        cycle_slice = observations[start_index : end_index + 1]
+        cycle_count = len(cycle_slice)
+        total_duration_min = sum(_duration_minutes(entry) for entry in cycle_slice)
+
+    deadtime_safe_start_index, blackout_active = _safe_window_start_after_recent_regime_transition(
+        observations,
+        start_index=start_index,
+        end_index=end_index,
+        regime=regime,
+        guard_cycles=_deadtime_guard_cycles(nd_hat),
+    )
+    if deadtime_safe_start_index is None:
+        return LearningWindowResult(
+            sample=None,
+            reason=f"{regime}_window_deadtime_blackout",
+            waiting_next_cycle=False,
+            deadtime_blackout_active=blackout_active,
+        )
+    if deadtime_safe_start_index != start_index:
+        start_index = deadtime_safe_start_index
         cycle_slice = observations[start_index : end_index + 1]
         cycle_count = len(cycle_slice)
         total_duration_min = sum(_duration_minutes(entry) for entry in cycle_slice)
@@ -162,6 +241,7 @@ def build_learning_window(
         ),
         reason=f"{regime}_window_ready",
         waiting_next_cycle=False,
+        deadtime_blackout_active=blackout_active,
     )
 
 
@@ -181,11 +261,7 @@ def _find_latest_candidate_end(
 
 
 def _matches_regime(entry: CycleHistoryEntry, regime: str) -> bool:
-    if regime == WINDOW_REGIME_OFF:
-        return entry.applied_power <= OFF_POWER_MAX
-    if regime == WINDOW_REGIME_ON:
-        return entry.applied_power >= ON_POWER_MIN
-    return False
+    return classify_cycle_regime(entry.applied_power) == regime
 
 
 def _duration_minutes(entry: CycleHistoryEntry) -> float:
@@ -196,8 +272,29 @@ def _has_setpoint_jump(left: CycleHistoryEntry, right: CycleHistoryEntry) -> boo
     return abs(left.target_temp - right.target_temp) > MAX_SETPOINT_JUMP
 
 
+def _blocks_regime_for_setpoint(
+    left: CycleHistoryEntry,
+    right: CycleHistoryEntry,
+    *,
+    regime: str,
+) -> bool:
+    """Return True when a setpoint jump contradicts the active learning regime."""
+    if not _has_setpoint_jump(left, right):
+        return False
+    if regime == WINDOW_REGIME_ON:
+        return right.target_temp < left.target_temp
+    if regime == WINDOW_REGIME_OFF:
+        return right.target_temp > left.target_temp
+    return True
+
+
 def _setpoint_guard_cycles(nd_hat: float) -> int:
     """Return the post-setpoint-change learning blackout in cycles."""
+    return max(1, int(ceil(max(nd_hat, 0.0))))
+
+
+def _deadtime_guard_cycles(nd_hat: float) -> int:
+    """Return the learning blackout after a regime transition."""
     return max(1, int(ceil(max(nd_hat, 0.0))))
 
 
@@ -207,11 +304,16 @@ def _safe_window_start_after_recent_setpoint_jump(
     start_index: int,
     end_index: int,
     guard_cycles: int,
+    regime: str,
 ) -> int | None:
     """Return the earliest safe start index after the latest setpoint jump."""
     latest_jump_following_index: int | None = None
     for index in range(0, end_index + 1):
-        if _has_setpoint_jump(observations[index], observations[index + 1]):
+        if _blocks_regime_for_setpoint(
+            observations[index],
+            observations[index + 1],
+            regime=regime,
+        ):
             latest_jump_following_index = index + 1
 
     if latest_jump_following_index is None:
@@ -223,3 +325,30 @@ def _safe_window_start_after_recent_setpoint_jump(
     if safe_start_index > end_index:
         return None
     return safe_start_index
+
+
+def _safe_window_start_after_recent_regime_transition(
+    observations: tuple[CycleHistoryEntry, ...],
+    *,
+    start_index: int,
+    end_index: int,
+    regime: str,
+    guard_cycles: int,
+) -> tuple[int | None, bool]:
+    """Return the earliest safe index after the latest regime transition."""
+    latest_transition_following_index: int | None = None
+    for index in range(1, end_index + 1):
+        previous_regime = classify_cycle_regime(observations[index - 1].applied_power)
+        current_regime = classify_cycle_regime(observations[index].applied_power)
+        if current_regime == regime and previous_regime != regime:
+            latest_transition_following_index = index
+
+    if latest_transition_following_index is None:
+        return start_index, False
+
+    safe_start_index = latest_transition_following_index + guard_cycles
+    if start_index >= safe_start_index:
+        return start_index, False
+    if safe_start_index > end_index:
+        return None, True
+    return safe_start_index, True

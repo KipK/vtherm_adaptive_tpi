@@ -11,6 +11,7 @@ from custom_components.vtherm_adaptive_tpi.adaptive_tpi.controller import (
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.deadtime import (
     CycleHistoryEntry,
+    DeadtimeSearchResult,
     DeadtimeModel,
     DeadtimeObservation,
 )
@@ -24,9 +25,12 @@ from custom_components.vtherm_adaptive_tpi.adaptive_tpi.estimator import (
     ParameterEstimator,
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.learning_window import (
+    WINDOW_REGIME_MIXED,
     WINDOW_REGIME_OFF,
     WINDOW_REGIME_ON,
+    build_anchored_learning_window,
     build_learning_window,
+    classify_cycle_regime,
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.supervisor import (
     PHASE_A,
@@ -412,13 +416,13 @@ def test_learning_window_ignores_recent_on_cycles_when_building_off_window() -> 
 
 
 def test_learning_window_rejects_setpoint_jump() -> None:
-    """A strong target change must invalidate the window to avoid mixing regimes."""
+    """A regime-contradicting target change must invalidate the window."""
     result = build_learning_window(
         (
             CycleHistoryEntry(
                 tin=20.0,
                 tout=10.0,
-                target_temp=21.0,
+                target_temp=20.4,
                 applied_power=0.0,
                 is_valid=True,
                 is_informative=False,
@@ -428,7 +432,7 @@ def test_learning_window_rejects_setpoint_jump() -> None:
             CycleHistoryEntry(
                 tin=19.7,
                 tout=10.0,
-                target_temp=20.4,
+                target_temp=21.0,
                 applied_power=0.0,
                 is_valid=True,
                 is_informative=False,
@@ -452,6 +456,49 @@ def test_learning_window_rejects_setpoint_jump() -> None:
 
     assert result.sample is None
     assert result.reason == "off_window_setpoint_changed"
+
+
+def test_learning_window_allows_setpoint_jump_that_reinforces_on_regime() -> None:
+    """An upward setpoint jump during heating should not invalidate an ON window."""
+    result = build_learning_window(
+        (
+            CycleHistoryEntry(
+                tin=20.0,
+                tout=10.0,
+                target_temp=21.0,
+                applied_power=0.7,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=20.2,
+                tout=10.0,
+                target_temp=21.5,
+                applied_power=0.7,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=20.45,
+                tout=10.0,
+                target_temp=21.5,
+                applied_power=0.7,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+        ),
+        nd_hat=1.0,
+        regime=WINDOW_REGIME_ON,
+    )
+
+    assert result.sample is not None
+    assert result.reason == "on_window_ready"
 
 
 def test_learning_window_waits_for_more_signal_after_truncating_setpoint_jump_window() -> None:
@@ -568,6 +615,56 @@ def test_learning_window_allows_one_safe_cycle_after_setpoint_jump_without_deadt
 
     assert result.sample is not None
     assert result.reason == "off_window_ready"
+
+
+def test_learning_window_blocks_deadtime_after_regime_transition() -> None:
+    """A freshly entered ON regime should stay in blackout for the configured deadtime."""
+    result = build_anchored_learning_window(
+        (
+            CycleHistoryEntry(
+                tin=19.0,
+                tout=10.0,
+                target_temp=20.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=18.8,
+                tout=10.0,
+                target_temp=20.0,
+                applied_power=0.7,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
+                tin=19.0,
+                tout=10.0,
+                target_temp=20.0,
+                applied_power=0.7,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=False,
+                cycle_duration_min=4.0,
+            ),
+        ),
+        nd_hat=1.0,
+        regime=WINDOW_REGIME_ON,
+        end_index=1,
+    )
+
+    assert result.sample is None
+    assert result.reason == "on_window_deadtime_blackout"
+    assert result.deadtime_blackout_active is True
+
+
+def test_classify_cycle_regime_returns_mixed_for_mid_power() -> None:
+    """Intermediate powers should be classified as mixed and not feed A/B directly."""
+    assert classify_cycle_regime(0.18) == WINDOW_REGIME_MIXED
 
 
 def test_learning_window_rejects_off_window_when_temperature_rises() -> None:
@@ -759,6 +856,79 @@ def test_non_informative_cycle_skips_estimator_update() -> None:
     assert diagnostics["last_freeze_reason"] == "non_informative_cycle"
     assert diagnostics["debug"]["last_cycle_classification"] == "non_informative"
     assert diagnostics["accepted_cycles_count"] == 2
+
+
+def test_completed_on_cycle_routes_to_a_not_b(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A completed ON cycle must not fall back to the OFF branch."""
+    algo = AdaptiveTPIAlgorithm(name="test-route-a", debug_mode=True)
+
+    def fake_record_cycle(observation, **kwargs):
+        algo._deadtime_model._cycle_history.append(
+            CycleHistoryEntry(
+                tin=observation.tin,
+                tout=observation.tout,
+                target_temp=observation.target_temp,
+                applied_power=observation.applied_power,
+                is_valid=kwargs["is_valid"],
+                is_informative=kwargs["is_informative"],
+                is_estimator_informative=kwargs["is_estimator_informative"],
+                cycle_duration_min=kwargs["cycle_duration_min"],
+            )
+        )
+        return DeadtimeSearchResult(
+            nd_hat=0.0,
+            c_nd=1.0,
+            locked=True,
+            best_candidate=0.0,
+            second_best_candidate=1.0,
+            best_candidate_a=0.3,
+            best_candidate_b=0.02,
+            candidate_costs={"0": 0.01, "1": 0.03},
+            lock_reason=None,
+        )
+
+    monkeypatch.setattr(algo._deadtime_model, "record_cycle", fake_record_cycle)
+    monkeypatch.setattr(
+        algo._supervisor,
+        "allow_a_update",
+        lambda **kwargs: True,
+    )
+
+    for _ in range(4):
+        algo._estimator.update_b(
+            BSample(
+                dTdt=-0.08,
+                delta_out=8.0,
+                setpoint_error=1.0,
+                u_eff=0.0,
+            )
+        )
+    algo._state.b_converged = True
+
+    algo.on_cycle_started(
+        on_time_sec=600.0,
+        off_time_sec=0.0,
+        on_percent=0.8,
+        hvac_mode="heat",
+        target_temp=21.0,
+        current_temp=20.0,
+        ext_current_temp=10.0,
+    )
+    algo.on_cycle_completed(
+        e_eff=0.8,
+        elapsed_ratio=1.0,
+        cycle_duration_min=10.0,
+        target_temp=21.0,
+        current_temp=20.3,
+        ext_current_temp=10.0,
+        hvac_mode="heat",
+    )
+
+    diagnostics = algo.get_diagnostics()
+    assert diagnostics["current_cycle_regime"] == "on"
+    assert diagnostics["learning_route_selected"] == "a"
+    assert diagnostics["last_learning_attempt_regime"] == "a"
+    assert diagnostics["a_samples_count"] >= 1
 
 
 def test_disturbed_cycle_freezes_adaptation() -> None:

@@ -154,6 +154,11 @@ class AdaptiveTPISupervisor:
         """Return True when `b` may learn from an OFF or quasi-OFF cycle."""
         return True
 
+    @staticmethod
+    def is_a_learning_enabled(*, deadtime_locked: bool, c_nd: float, b_converged: bool) -> bool:
+        """Return True when the runtime conditions allow `a` learning."""
+        return deadtime_locked and c_nd >= CONFIDENCE_LOCK_THRESHOLD and b_converged
+
     def allow_a_update(self, *, deadtime_locked: bool, c_nd: float, b_converged: bool) -> bool:
         """Return True when the `a` estimator may consume the current accepted cycle."""
         if not deadtime_locked:

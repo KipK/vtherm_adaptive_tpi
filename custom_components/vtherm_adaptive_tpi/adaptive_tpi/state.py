@@ -104,6 +104,11 @@ class AdaptiveTPIState:
     b_crosscheck_error: float | None = None
     b_methods_consistent: bool = False
     deadtime_candidate_costs: dict[str, float] = field(default_factory=dict)
+    a_learning_enabled: bool = False
+    current_cycle_regime: str | None = None
+    learning_route_selected: str | None = None
+    learning_route_block_reason: str | None = None
+    deadtime_learning_blackout_active: bool = False
 
     def to_persisted_dict(self) -> dict[str, Any]:
         """Return the adaptive state that must survive restarts."""

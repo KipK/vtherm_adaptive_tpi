@@ -8,13 +8,16 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .adaptive_tpi.controller import compute_on_percent, project_gains
-from .adaptive_tpi.deadtime import DeadtimeModel, DeadtimeObservation
+from .adaptive_tpi.deadtime import CycleHistoryEntry, DeadtimeModel, DeadtimeObservation
 from .adaptive_tpi.diagnostics import build_diagnostics
 from .adaptive_tpi.estimator import ASample, BSample, ParameterEstimator
 from .adaptive_tpi.learning_window import (
+    WINDOW_REGIME_MIXED,
     WINDOW_REGIME_OFF,
     WINDOW_REGIME_ON,
+    build_anchored_learning_window,
     build_learning_window,
+    classify_cycle_regime,
 )
 from .adaptive_tpi.state import AdaptiveTPIState
 from .adaptive_tpi.supervisor import AdaptiveTPISupervisor, PHASE_A, PHASE_B
@@ -209,6 +212,10 @@ class AdaptiveTPIAlgorithm:
         self._last_accepted_at = self._utc_now()
         self._state.valid_cycles_count += 1
         self._state.accepted_cycles_count += 1
+        self._state.current_cycle_regime = classify_cycle_regime(pending_cycle.applied_power)
+        self._state.learning_route_selected = "none"
+        self._state.learning_route_block_reason = None
+        self._state.deadtime_learning_blackout_active = False
         if isinstance(cycle_duration_min, (int, float)):
             self._state.cycle_min_at_last_accepted_cycle = float(cycle_duration_min)
 
@@ -218,6 +225,7 @@ class AdaptiveTPIAlgorithm:
         if not deadtime_informative and not estimator_informative:
             self._state.last_learning_attempt_reason = "non_informative_cycle"
             self._state.last_learning_attempt_regime = None
+            self._state.learning_route_block_reason = "non_informative_cycle"
             self._record_cycle_history(
                 pending_cycle,
                 cycle_duration_min=cycle_duration_min or 5.0,
@@ -257,6 +265,11 @@ class AdaptiveTPIAlgorithm:
             confidence=deadtime_result.c_nd,
             lock_reason=deadtime_result.lock_reason,
         )
+        self._state.a_learning_enabled = self._supervisor.is_a_learning_enabled(
+            deadtime_locked=deadtime_result.locked,
+            c_nd=deadtime_result.c_nd,
+            b_converged=self._state.b_converged,
+        )
         if (
             self._state.b_samples_count == 0
             and deadtime_result.best_candidate_b is not None
@@ -266,60 +279,77 @@ class AdaptiveTPIAlgorithm:
                 self._estimator.seed_b_from_deadtime_proxy(deadtime_result.best_candidate_b)
             )
         estimator_updated = False
-        off_window = build_learning_window(
-            self._deadtime_model.cycle_history,
-            nd_hat=self._state.nd_hat,
-            regime=WINDOW_REGIME_OFF,
-        )
-        on_window = build_learning_window(
-            self._deadtime_model.cycle_history,
-            nd_hat=self._state.nd_hat,
-            regime=WINDOW_REGIME_ON,
-        )
-
         estimator_update = None
-        if (
-            off_window.sample is not None
-            and self._supervisor.allow_b_update()
-        ):
+        current_cycle_regime = self._state.current_cycle_regime
+
+        observations = self._learning_observations_with_terminal(
+            target_temp=target_temp,
+            current_temp=current_temp,
+            ext_current_temp=ext_current_temp,
+            cycle_duration_min=cycle_duration_min or 5.0,
+            applied_power=pending_cycle.applied_power,
+        )
+        anchored_end_index = len(observations) - 2
+
+        if current_cycle_regime == WINDOW_REGIME_OFF:
+            self._state.learning_route_selected = "b"
+            off_window = build_anchored_learning_window(
+                observations,
+                nd_hat=self._state.nd_hat,
+                regime=WINDOW_REGIME_OFF,
+                end_index=anchored_end_index,
+            )
+            self._state.deadtime_learning_blackout_active = off_window.deadtime_blackout_active
             self._state.last_learning_attempt_regime = "b"
             self._state.last_learning_attempt_reason = off_window.reason
-            estimator_update = self._estimator.update_b(
-                BSample(
-                    dTdt=off_window.sample.dTdt,
-                    delta_out=off_window.sample.delta_out,
-                    setpoint_error=off_window.sample.setpoint_error,
-                    u_eff=off_window.sample.u_eff,
-                ),
-                reason=off_window.reason,
+            if off_window.sample is not None and self._supervisor.allow_b_update():
+                estimator_update = self._estimator.update_b(
+                    BSample(
+                        dTdt=off_window.sample.dTdt,
+                        delta_out=off_window.sample.delta_out,
+                        setpoint_error=off_window.sample.setpoint_error,
+                        u_eff=off_window.sample.u_eff,
+                    ),
+                    reason=off_window.reason,
+                )
+            else:
+                self._state.learning_route_block_reason = off_window.reason
+                self._state.b_last_reason = off_window.reason
+        elif current_cycle_regime == WINDOW_REGIME_ON:
+            self._state.learning_route_selected = "a"
+            on_window = build_anchored_learning_window(
+                observations,
+                nd_hat=self._state.nd_hat,
+                regime=WINDOW_REGIME_ON,
+                end_index=anchored_end_index,
             )
-        elif on_window.sample is not None and self._supervisor.allow_a_update(
-            deadtime_locked=deadtime_result.locked,
-            c_nd=deadtime_result.c_nd,
-            b_converged=self._state.b_converged,
-        ):
+            self._state.deadtime_learning_blackout_active = on_window.deadtime_blackout_active
             self._state.last_learning_attempt_regime = "a"
             self._state.last_learning_attempt_reason = on_window.reason
-            estimator_update = self._estimator.update_a(
-                ASample(
-                    dTdt=on_window.sample.dTdt,
-                    delta_out=on_window.sample.delta_out,
-                    setpoint_error=on_window.sample.setpoint_error,
-                    u_eff=on_window.sample.u_eff,
-                ),
-                reason=on_window.reason,
-            )
+            if on_window.sample is not None and self._supervisor.allow_a_update(
+                deadtime_locked=deadtime_result.locked,
+                c_nd=deadtime_result.c_nd,
+                b_converged=self._state.b_converged,
+            ):
+                estimator_update = self._estimator.update_a(
+                    ASample(
+                        dTdt=on_window.sample.dTdt,
+                        delta_out=on_window.sample.delta_out,
+                        setpoint_error=on_window.sample.setpoint_error,
+                        u_eff=on_window.sample.u_eff,
+                    ),
+                    reason=on_window.reason,
+                )
+            else:
+                self._state.learning_route_block_reason = (
+                    self._supervisor.last_freeze_reason or on_window.reason
+                )
+                self._state.last_learning_attempt_reason = self._state.learning_route_block_reason
+                self._state.a_last_reason = self._state.learning_route_block_reason
         else:
-            self._state.last_learning_attempt_regime = (
-                "b" if off_window.sample is not None else "a" if on_window.sample is not None else None
-            )
-            self._state.last_learning_attempt_reason = (
-                self._supervisor.last_freeze_reason
-                or off_window.reason
-                or on_window.reason
-            )
-            self._state.a_last_reason = self._supervisor.last_freeze_reason or on_window.reason
-            self._state.b_last_reason = off_window.reason
+            self._state.last_learning_attempt_regime = None
+            self._state.last_learning_attempt_reason = "mixed_cycle_regime"
+            self._state.learning_route_block_reason = "mixed_cycle_regime"
 
         if estimator_update is not None:
             self._apply_estimator_update(estimator_update)
@@ -329,15 +359,19 @@ class AdaptiveTPIAlgorithm:
                 else estimator_update.a_last_reason
             )
             estimator_updated = estimator_update.updated
-        elif off_window.sample is None and on_window.sample is None:
-            self._state.last_learning_attempt_reason = off_window.reason
-            self._state.last_learning_attempt_regime = None
-            self._supervisor.finalize_non_informative_cycle()
+            self._state.learning_route_block_reason = None
+        else:
+            self._supervisor.finalize_non_informative_cycle(self._state.last_learning_attempt_reason)
         self._refresh_b_crosscheck()
         self._supervisor.update_phase_progression(
             self._state,
             deadtime_costs_available=bool(deadtime_result.candidate_costs),
             estimator_updated=estimator_updated,
+        )
+        self._state.a_learning_enabled = self._supervisor.is_a_learning_enabled(
+            deadtime_locked=self._state.deadtime_locked,
+            c_nd=self._state.c_nd,
+            b_converged=self._state.b_converged,
         )
         self._refresh_projected_gains()
         self._supervisor.apply_to_state(self._state)
@@ -620,6 +654,30 @@ class AdaptiveTPIAlgorithm:
             target_temp=sample.target_temp,
             applied_power=self._state.on_percent,
         )
+
+    def _learning_observations_with_terminal(
+        self,
+        *,
+        target_temp: float | None,
+        current_temp: float | None,
+        ext_current_temp: float | None,
+        cycle_duration_min: float,
+        applied_power: float,
+    ) -> tuple[CycleHistoryEntry, ...]:
+        """Return the stored cycle history plus the current cycle end point."""
+        if target_temp is None or current_temp is None or ext_current_temp is None:
+            return self._deadtime_model.cycle_history
+        terminal_entry = CycleHistoryEntry(
+            tin=float(current_temp),
+            tout=float(ext_current_temp),
+            target_temp=float(target_temp),
+            applied_power=float(applied_power),
+            is_valid=True,
+            is_informative=False,
+            is_estimator_informative=False,
+            cycle_duration_min=cycle_duration_min,
+        )
+        return self._deadtime_model.cycle_history + (terminal_entry,)
 
     def _record_cycle_history(
         self,
