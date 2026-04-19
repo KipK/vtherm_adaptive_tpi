@@ -542,6 +542,16 @@ def test_learning_window_allows_one_safe_cycle_after_setpoint_jump_without_deadt
                 cycle_duration_min=4.0,
             ),
             CycleHistoryEntry(
+                tin=19.45,
+                tout=10.0,
+                target_temp=20.4,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=True,
+                cycle_duration_min=4.0,
+            ),
+            CycleHistoryEntry(
                 tin=19.35,
                 tout=10.0,
                 target_temp=20.4,
@@ -935,6 +945,44 @@ def test_cycle_min_change_invalidates_persisted_warm_start() -> None:
     assert diagnostics["last_freeze_reason"] == "cycle_min_changed_revalidation"
     assert diagnostics["debug"]["deadtime_locked"] is False
     assert diagnostics["deadtime_candidate_costs"] == {}
+
+
+def test_warm_start_restores_deadtime_model_and_candidate_costs() -> None:
+    """A normal warm start should preserve the deadtime model, not only the summary state."""
+    algo = AdaptiveTPIAlgorithm(name="test-deadtime-persistence", debug_mode=True)
+
+    for observation in _make_deadtime_lock_sequence():
+        algo._deadtime_model.record_accepted_observation(observation)
+
+    result = algo._deadtime_model.last_result
+    algo._state.nd_hat = result.nd_hat
+    algo._state.c_nd = result.c_nd
+    algo._state.deadtime_locked = result.locked
+    algo._state.deadtime_best_candidate = result.best_candidate
+    algo._state.deadtime_second_best_candidate = result.second_best_candidate
+    algo._state.deadtime_candidate_costs = result.candidate_costs
+    algo._state.deadtime_b_proxy = result.best_candidate_b
+    algo._state.bootstrap_phase = PHASE_C
+    algo._state.a_hat = 0.2
+    algo._state.b_hat = 0.03
+    algo._state.c_a = 0.8
+    algo._state.c_b = 0.8
+
+    saved = algo.save_state()
+
+    restored = AdaptiveTPIAlgorithm(name="test-deadtime-persistence-restore", debug_mode=True)
+    restored.load_state(
+        saved,
+        current_cycle_min=5.0,
+        persisted_cycle_min=5.0,
+    )
+
+    diagnostics = restored.get_diagnostics()
+    assert diagnostics["nd_hat"] == pytest.approx(result.nd_hat)
+    assert diagnostics["c_nd"] == pytest.approx(result.c_nd)
+    assert diagnostics["deadtime_candidate_costs"] == result.candidate_costs
+    assert diagnostics["deadtime_b_proxy"] == pytest.approx(result.best_candidate_b)
+    assert diagnostics["debug"]["deadtime_best_candidate"] == pytest.approx(result.best_candidate)
 
 
 def test_bootstrap_stuck_exposes_explicit_freeze_reason() -> None:

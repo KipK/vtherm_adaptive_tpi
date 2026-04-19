@@ -349,7 +349,10 @@ class AdaptiveTPIAlgorithm:
 
     def save_state(self) -> dict:
         """Return a persistable algorithm snapshot."""
-        return self._state.to_persisted_dict()
+        return {
+            **self._state.to_persisted_dict(),
+            "deadtime_model": self._deadtime_model.to_persisted_dict(),
+        }
 
     def reset_learning(self) -> None:
         """Reset all learned state and return to a fresh bootstrap runtime."""
@@ -393,18 +396,38 @@ class AdaptiveTPIAlgorithm:
         try:
             self._state.apply_persisted_dict(data)
             self._last_accepted_at = self._parse_datetime(last_accepted_at)
-            self._apply_persistence_invalidation(
+            should_restore_deadtime = self._apply_persistence_invalidation(
                 current_cycle_min=current_cycle_min,
                 persisted_cycle_min=persisted_cycle_min,
                 saved_at=saved_at,
                 last_accepted_at=last_accepted_at,
             )
+            if should_restore_deadtime:
+                self._deadtime_model.load_persisted_dict(data.get("deadtime_model"))
+            else:
+                self._deadtime_model.reset()
+                self._state.nd_hat = 0.0
+                self._state.c_nd = 0.0
+                self._state.deadtime_locked = False
+                self._state.deadtime_best_candidate = None
+                self._state.deadtime_second_best_candidate = None
+                self._state.deadtime_b_proxy = None
+                self._state.deadtime_candidate_costs = {}
             self._estimator.restore(
                 a_hat=self._state.a_hat,
                 b_hat=self._state.b_hat,
                 c_a=self._state.c_a,
                 c_b=self._state.c_b,
             )
+            if should_restore_deadtime:
+                deadtime_result = self._deadtime_model.last_result
+                self._state.nd_hat = deadtime_result.nd_hat
+                self._state.c_nd = deadtime_result.c_nd
+                self._state.deadtime_locked = deadtime_result.locked
+                self._state.deadtime_best_candidate = deadtime_result.best_candidate
+                self._state.deadtime_second_best_candidate = deadtime_result.second_best_candidate
+                self._state.deadtime_b_proxy = deadtime_result.best_candidate_b
+                self._state.deadtime_candidate_costs = deadtime_result.candidate_costs
             self._state.a_hat = self._estimator.a_hat
             self._state.b_hat = self._estimator.b_hat
             self._state.c_a = self._estimator.c_a
@@ -487,8 +510,11 @@ class AdaptiveTPIAlgorithm:
         persisted_cycle_min: float | None,
         saved_at: str | None,
         last_accepted_at: str | None,
-    ) -> None:
-        """Adjust persisted trust depending on runtime context changes."""
+    ) -> bool:
+        """Adjust persisted trust depending on runtime context changes.
+
+        Returns True when deadtime history may safely be restored.
+        """
         if (
             isinstance(current_cycle_min, (int, float))
             and isinstance(persisted_cycle_min, (int, float))
@@ -504,11 +530,11 @@ class AdaptiveTPIAlgorithm:
             self._supervisor.set_phase(PHASE_A)
             self._supervisor.last_freeze_reason = "cycle_min_changed_revalidation"
             self._state.last_freeze_reason = self._supervisor.last_freeze_reason
-            return
+            return False
 
         reference_time = self._parse_datetime(last_accepted_at) or self._parse_datetime(saved_at)
         if reference_time is None:
-            return
+            return True
 
         age_days = (self._utc_now() - reference_time).days
         if age_days > _CONFIDENCE_DECAY_90_DAYS:
@@ -517,7 +543,7 @@ class AdaptiveTPIAlgorithm:
             self._supervisor.set_phase(PHASE_A)
             self._supervisor.last_freeze_reason = "warm_start_revalidation_required"
             self._state.last_freeze_reason = self._supervisor.last_freeze_reason
-            return
+            return False
 
         if age_days > _CONFIDENCE_DECAY_30_DAYS:
             self._state.decay_confidences(0.5)
@@ -526,6 +552,7 @@ class AdaptiveTPIAlgorithm:
                 self._supervisor.set_phase(PHASE_B)
             self._supervisor.last_freeze_reason = "warm_start_confidence_decay"
             self._state.last_freeze_reason = self._supervisor.last_freeze_reason
+        return True
 
     @staticmethod
     def _parse_datetime(value: str | None) -> datetime | None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Mapping
 
 A_FLOOR = 1e-3
 CONFIDENCE_LOCK_THRESHOLD = 0.6
@@ -132,9 +133,75 @@ class DeadtimeModel:
             locked=False,
             best_candidate=None,
             second_best_candidate=None,
+            best_candidate_a=None,
+            best_candidate_b=None,
             candidate_costs={},
             lock_reason="insufficient_data",
         )
+
+    def to_persisted_dict(self) -> dict[str, Any]:
+        """Serialize the deadtime model so warm restarts preserve learning continuity."""
+        return {
+            "thermostat_class": self._thermostat_class,
+            "cycle_history": [
+                {
+                    "tin": entry.tin,
+                    "tout": entry.tout,
+                    "target_temp": entry.target_temp,
+                    "applied_power": entry.applied_power,
+                    "is_valid": entry.is_valid,
+                    "is_informative": entry.is_informative,
+                    "is_estimator_informative": entry.is_estimator_informative,
+                    "cycle_duration_min": entry.cycle_duration_min,
+                }
+                for entry in self._cycle_history
+            ],
+            "best_candidate_history": list(self._best_candidate_history),
+        }
+
+    def load_persisted_dict(self, data: Mapping[str, Any] | None) -> None:
+        """Restore the deadtime model from persisted payload."""
+        self.reset()
+        if not isinstance(data, Mapping):
+            return
+
+        thermostat_class = data.get("thermostat_class")
+        if isinstance(thermostat_class, str) and thermostat_class in CANDIDATE_SETS:
+            self._thermostat_class = thermostat_class
+
+        loaded_history: list[CycleHistoryEntry] = []
+        raw_history = data.get("cycle_history")
+        if isinstance(raw_history, list):
+            for raw_entry in raw_history:
+                if not isinstance(raw_entry, Mapping):
+                    continue
+                try:
+                    loaded_history.append(
+                        CycleHistoryEntry(
+                            tin=float(raw_entry["tin"]),
+                            tout=float(raw_entry["tout"]),
+                            target_temp=float(raw_entry["target_temp"]),
+                            applied_power=float(raw_entry["applied_power"]),
+                            is_valid=bool(raw_entry["is_valid"]),
+                            is_informative=bool(raw_entry["is_informative"]),
+                            is_estimator_informative=bool(raw_entry["is_estimator_informative"]),
+                            cycle_duration_min=float(raw_entry.get("cycle_duration_min", 5.0)),
+                        )
+                    )
+                except (KeyError, TypeError, ValueError):
+                    continue
+        self._cycle_history = loaded_history
+
+        raw_best_history = data.get("best_candidate_history")
+        if isinstance(raw_best_history, list):
+            self._best_candidate_history = [
+                int(candidate)
+                for candidate in raw_best_history
+                if isinstance(candidate, (int, float)) and int(candidate) in self.candidate_set()
+            ]
+
+        if self._cycle_history:
+            self.last_result = self.evaluate(track_winner=False)
 
     def record_accepted_observation(
         self,
