@@ -21,8 +21,8 @@ At a high level:
 4. at cycle end, the plugin decides whether the cycle is valid for learning
 5. if valid, it updates:
    - deadtime search
-   - OFF learning for `b`
-   - ON learning for `a`
+   - regime-routed OFF learning for `b`
+   - regime-routed ON learning for `a`
 6. projected gains `k_int` and `k_ext` are refreshed conservatively
 
 ## Main Modules
@@ -78,16 +78,24 @@ Responsibilities:
 
 - reconstruct recent OFF windows for `b`
 - reconstruct recent ON windows for `a`
+- anchor windows on the current completed cycle
 - enforce short bounded windows
 - reject windows when:
   - the signal is too weak
   - the regime sign is inconsistent
-  - a recent setpoint jump is too close
+  - a recent setpoint change contradicts the regime
+  - the window still intersects the post-transition deadtime blackout
 
-The setpoint-jump guard currently depends on deadtime:
+The learning blackout currently depends on deadtime:
 
-- blackout of `ceil(nd_hat)` cycles after a jump
+- blackout of `ceil(nd_hat)` cycles after a regime transition
 - with a minimum safety blackout of `1` cycle when deadtime is not yet known
+
+The setpoint-jump guard is regime-oriented:
+
+- ON windows tolerate upward setpoint jumps that reinforce heating
+- OFF windows tolerate downward setpoint jumps that reinforce the current no-heat regime
+- contradictory jumps still invalidate the window
 
 ### `adaptive_tpi/estimator.py`
 
@@ -150,21 +158,30 @@ It also exposes a temporary `b` proxy from the best candidate fit.
 
 ### 4. Window extraction
 
-The algorithm tries to build:
+The algorithm first classifies the completed cycle into a coarse regime:
+
+- `off`
+- `on`
+- `mixed`
+
+It then builds one anchored window for that same completed cycle:
 
 - one OFF window for `b`
-- one ON window for `a`
+- or one ON window for `a`
 
-These windows are independent by regime. A recent ON segment should not hide a valid OFF window, and vice versa.
+The runtime no longer searches the full history for whichever regime happens to be available first.
+The current completed cycle decides the learning route.
 
 ### 5. Estimation
 
 Routing logic is:
 
-- `b` may learn early from OFF windows
+- `b` may learn from OFF windows routed from an OFF completed cycle
 - `a` waits for:
   - credible deadtime
   - converged `b`
+- both `a` and `b` are blocked while the candidate window still lies in the deadtime blackout after a regime transition
+- mixed cycles do not feed `a` or `b`
 
 The deadtime-side `b` proxy is also used as a light bootstrap seed for the explicit `b` estimator when no OFF sample has been accepted yet.
 
@@ -205,6 +222,12 @@ Useful diagnostic groups:
   - `b_samples_count`
   - `a_last_reason`
   - `b_last_reason`
+- routing:
+  - `current_cycle_regime`
+  - `learning_route_selected`
+  - `learning_route_block_reason`
+  - `a_learning_enabled`
+  - `deadtime_learning_blackout_active`
 - cross-check:
   - `deadtime_b_proxy`
   - `b_crosscheck_error`

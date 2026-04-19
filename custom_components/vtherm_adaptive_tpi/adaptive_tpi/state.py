@@ -104,6 +104,9 @@ class AdaptiveTPIState:
     b_crosscheck_error: float | None = None
     b_methods_consistent: bool = False
     deadtime_candidate_costs: dict[str, float] = field(default_factory=dict)
+    # These routing diagnostics describe the latest runtime decision only.
+    # They are intentionally kept out of persistence so restarts do not restore
+    # stale branch-selection information as if it were still current.
     a_learning_enabled: bool = False
     current_cycle_regime: str | None = None
     learning_route_selected: str | None = None

@@ -78,6 +78,28 @@ Interpretation:
 - `c_a`, `c_b`: confidence in these estimates
 - `b_converged`: whether `b` is stable enough to open learning for `a`
 
+### Routing state
+
+- `current_cycle_regime`
+- `learning_route_selected`
+- `learning_route_block_reason`
+- `a_learning_enabled`
+- `deadtime_learning_blackout_active`
+
+Interpretation:
+
+- `current_cycle_regime` describes how the completed cycle was classified:
+  - `off`
+  - `on`
+  - `mixed`
+- `learning_route_selected` is the branch chosen for that completed cycle:
+  - `a`
+  - `b`
+  - `none`
+- `learning_route_block_reason` explains why the chosen route did not lead to an accepted update
+- `a_learning_enabled` means the runtime conditions are good enough to let `a` learn when an ON window is valid
+- `deadtime_learning_blackout_active = true` means the window is still inside the post-transition deadtime blackout, so explicit `a`/`b` learning is held back
+
 ### Informative flags
 
 - `i_a`
@@ -121,6 +143,8 @@ Examples:
 - `deadtime_not_locked`
 - `off_window_no_candidate`
 - `off_window_waiting_more_signal`
+- `on_window_deadtime_blackout`
+- `mixed_cycle_regime`
 
 ### Branch-specific reasons
 
@@ -134,6 +158,7 @@ Examples for `b`:
 - `off_window_no_candidate`
 - `off_window_setpoint_changed`
 - `off_window_waiting_more_signal`
+- `off_window_deadtime_blackout`
 - `b_delta_out_too_small`
 - `b_setpoint_error_too_small`
 - `b_window_not_quasi_off`
@@ -191,7 +216,8 @@ Look at:
 Common explanations:
 
 - no valid OFF candidate yet
-- setpoint jump too recent
+- a contradictory setpoint jump invalidated the window
+- the cycle is still inside the deadtime blackout after a recent regime transition
 - not enough signal
 - setpoint error too small
 
@@ -202,6 +228,34 @@ Look at:
 - `deadtime_locked`
 - `c_nd`
 - `b_converged`
+- `a_learning_enabled`
 - `a_last_reason`
 
 This is often normal during bootstrap.
+
+### Case 5: learning is blocked even though cycles complete
+
+Look at:
+
+- `current_cycle_regime`
+- `learning_route_selected`
+- `learning_route_block_reason`
+- `deadtime_learning_blackout_active`
+
+Common explanations:
+
+- the completed cycle is `mixed`, so no explicit `a`/`b` route is opened
+- the route is correct, but the window is still inside the deadtime blackout
+- the setpoint moved against the current regime and invalidated the window
+
+## Persistence Note
+
+The routing diagnostics are runtime-only by design:
+
+- `current_cycle_regime`
+- `learning_route_selected`
+- `learning_route_block_reason`
+- `deadtime_learning_blackout_active`
+
+They describe the latest decision path and are not intended to survive a restart.
+Persistent fields remain focused on adaptive state continuity rather than the last branch-selection event.
