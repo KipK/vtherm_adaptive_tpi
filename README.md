@@ -72,17 +72,7 @@ So it is normal at first to see:
 - `b_converged = false`
 - gains still close to defaults
 
-### 3. Watch `hvac_action`, not only the climate mode
-
-When the thermostat is in a thermal OFF phase, the climate often remains in `heat` mode.
-
-What matters operationally is usually:
-
-- `hvac_action`
-- `on_percent`
-- whether the underlying device is actually active
-
-### 4. Use diagnostics to understand learning
+### 3. Use diagnostics to understand learning
 
 The plugin exposes learning diagnostics in the climate `specific_states`.
 
