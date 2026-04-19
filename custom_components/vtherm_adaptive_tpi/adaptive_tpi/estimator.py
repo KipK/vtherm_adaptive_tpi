@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from statistics import median
+from typing import Any, Mapping
 
 A_MIN = 1e-3
 A_MAX = 2.0
@@ -87,6 +88,38 @@ class _RobustScalarEstimator:
         if bounded > self._lower:
             self._samples.append(bounded)
 
+    def to_persisted_dict(self) -> dict[str, Any]:
+        """Serialize the bounded sample history required for warm starts."""
+        return {
+            "samples": list(self._samples),
+            "last_reason": self.last_reason,
+        }
+
+    def load_persisted_dict(self, data: Mapping[str, Any] | None) -> bool:
+        """Restore the bounded sample history from persistence."""
+        if not isinstance(data, Mapping):
+            return False
+
+        raw_samples = data.get("samples")
+        if not isinstance(raw_samples, list):
+            return False
+
+        cleaned_samples: list[float] = []
+        for raw_sample in raw_samples[-WINDOW_HISTORY:]:
+            if isinstance(raw_sample, bool):
+                continue
+            try:
+                cleaned_samples.append(_clamp(float(raw_sample), self._lower, self._upper))
+            except (TypeError, ValueError):
+                continue
+
+        self._samples.clear()
+        self._samples.extend(cleaned_samples)
+
+        last_reason = data.get("last_reason")
+        self.last_reason = last_reason if isinstance(last_reason, str) and last_reason else "restored"
+        return True
+
     @property
     def samples_count(self) -> int:
         return len(self._samples)
@@ -159,6 +192,30 @@ class ParameterEstimator:
         self._a_estimator.restore(self.a_hat, self.c_a)
         self._b_estimator.restore(self.b_hat, self.c_b)
         self.b_converged = self._compute_b_converged()
+
+    def to_persisted_dict(self) -> dict[str, Any]:
+        """Serialize estimator internals required for warm starts."""
+        return {
+            "a_estimator": self._a_estimator.to_persisted_dict(),
+            "b_estimator": self._b_estimator.to_persisted_dict(),
+        }
+
+    def load_persisted_dict(self, data: Mapping[str, Any] | None) -> bool:
+        """Restore estimator internals from persistence when available."""
+        if not isinstance(data, Mapping):
+            return False
+
+        a_restored = self._a_estimator.load_persisted_dict(data.get("a_estimator"))
+        b_restored = self._b_estimator.load_persisted_dict(data.get("b_estimator"))
+        if not a_restored or not b_restored:
+            return False
+
+        self.a_hat = self._a_estimator.estimate if self._a_estimator.samples_count else A_MIN
+        self.b_hat = self._b_estimator.estimate if self._b_estimator.samples_count else B_MIN
+        self.c_a = self._a_estimator.confidence
+        self.c_b = self._b_estimator.confidence
+        self.b_converged = self._compute_b_converged()
+        return True
 
     def update_b(self, sample: BSample | None, reason: str = "b_sample_missing") -> EstimatorUpdate:
         """Update the thermal loss estimator only."""

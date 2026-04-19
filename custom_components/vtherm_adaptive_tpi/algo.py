@@ -352,6 +352,7 @@ class AdaptiveTPIAlgorithm:
         return {
             **self._state.to_persisted_dict(),
             "deadtime_model": self._deadtime_model.to_persisted_dict(),
+            "estimator_model": self._estimator.to_persisted_dict(),
         }
 
     def reset_learning(self) -> None:
@@ -413,12 +414,16 @@ class AdaptiveTPIAlgorithm:
                 self._state.deadtime_second_best_candidate = None
                 self._state.deadtime_b_proxy = None
                 self._state.deadtime_candidate_costs = {}
-            self._estimator.restore(
-                a_hat=self._state.a_hat,
-                b_hat=self._state.b_hat,
-                c_a=self._state.c_a,
-                c_b=self._state.c_b,
+            estimator_restored = should_restore_deadtime and self._estimator.load_persisted_dict(
+                data.get("estimator_model")
             )
+            if not estimator_restored:
+                self._estimator.restore(
+                    a_hat=self._state.a_hat,
+                    b_hat=self._state.b_hat,
+                    c_a=self._state.c_a,
+                    c_b=self._state.c_b,
+                )
             if should_restore_deadtime:
                 deadtime_result = self._deadtime_model.last_result
                 self._state.nd_hat = deadtime_result.nd_hat
@@ -432,6 +437,13 @@ class AdaptiveTPIAlgorithm:
             self._state.b_hat = self._estimator.b_hat
             self._state.c_a = self._estimator.c_a
             self._state.c_b = self._estimator.c_b
+            self._state.b_converged = self._estimator.b_converged
+            self._state.a_samples_count = self._estimator._a_estimator.samples_count
+            self._state.b_samples_count = self._estimator._b_estimator.samples_count
+            self._state.a_last_reason = self._estimator._a_estimator.last_reason
+            self._state.b_last_reason = self._estimator._b_estimator.last_reason
+            self._state.a_dispersion = self._estimator._a_estimator.dispersion
+            self._state.b_dispersion = self._estimator._b_estimator.dispersion
             self._supervisor.set_phase(self._state.bootstrap_phase)
             self._supervisor.apply_to_state(self._state)
             self._refresh_projected_gains()

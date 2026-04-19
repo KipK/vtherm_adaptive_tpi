@@ -454,8 +454,8 @@ def test_learning_window_rejects_setpoint_jump() -> None:
     assert result.reason == "off_window_setpoint_changed"
 
 
-def test_learning_window_rejects_setpoint_jump_before_window_start() -> None:
-    """A target jump just before the selected window must also invalidate learning."""
+def test_learning_window_waits_for_more_signal_after_truncating_setpoint_jump_window() -> None:
+    """A truncated post-jump window should wait until enough safe signal is available."""
     result = build_learning_window(
         (
             CycleHistoryEntry(
@@ -504,7 +504,7 @@ def test_learning_window_rejects_setpoint_jump_before_window_start() -> None:
     )
 
     assert result.sample is None
-    assert result.reason == "off_window_setpoint_changed"
+    assert result.reason == "off_window_waiting_more_signal"
 
 
 def test_learning_window_allows_one_safe_cycle_after_setpoint_jump_without_deadtime() -> None:
@@ -845,7 +845,7 @@ def test_algo_exposes_deadtime_b_proxy_and_crosscheck_after_bootstrap_seed() -> 
 
 
 def test_gain_projection_keeps_bootstrap_defaults_while_confidence_is_low() -> None:
-    """Low-confidence bootstrap should hold gains at their safe defaults."""
+    """Low-confidence degraded mode should freeze the last computed gains."""
     next_k_int, next_k_ext = project_gains(
         phase=PHASE_B,
         k_int=1.2,
@@ -858,8 +858,8 @@ def test_gain_projection_keeps_bootstrap_defaults_while_confidence_is_low() -> N
         c_b=0.0,
     )
 
-    assert next_k_int == pytest.approx(0.6)
-    assert next_k_ext == pytest.approx(0.01)
+    assert next_k_int == pytest.approx(1.2)
+    assert next_k_ext == pytest.approx(0.0)
 
 
 def test_calculate_does_not_adapt_gains_on_sensor_refresh() -> None:
@@ -983,6 +983,55 @@ def test_warm_start_restores_deadtime_model_and_candidate_costs() -> None:
     assert diagnostics["deadtime_candidate_costs"] == result.candidate_costs
     assert diagnostics["deadtime_b_proxy"] == pytest.approx(result.best_candidate_b)
     assert diagnostics["debug"]["deadtime_best_candidate"] == pytest.approx(result.best_candidate)
+
+
+def test_warm_start_restores_estimator_history_and_keeps_adaptive_gains() -> None:
+    """A warm start should preserve estimator confidence and the last adaptive gains."""
+    algo = AdaptiveTPIAlgorithm(name="test-estimator-persistence", debug_mode=True)
+    algo._state.bootstrap_phase = PHASE_C
+
+    b_samples = (0.0200, 0.0210, 0.0220, 0.0230, 0.0225, 0.0215)
+    for measurement in b_samples:
+        algo._estimator._b_estimator.push(measurement)
+
+    algo._estimator.b_hat = algo._estimator._b_estimator.estimate
+    algo._estimator.c_b = algo._estimator._b_estimator.confidence
+    algo._estimator.b_converged = algo._estimator._compute_b_converged()
+
+    a_samples = (0.740, 0.755, 0.765, 0.775, 0.760, 0.770)
+    for measurement in a_samples:
+        algo._estimator._a_estimator.push(measurement)
+
+    algo._estimator.a_hat = algo._estimator._a_estimator.estimate
+    algo._estimator.c_a = algo._estimator._a_estimator.confidence
+
+    algo._state.a_hat = algo._estimator.a_hat
+    algo._state.b_hat = algo._estimator.b_hat
+    algo._state.c_a = algo._estimator.c_a
+    algo._state.c_b = algo._estimator.c_b
+    algo._state.b_converged = algo._estimator.b_converged
+    algo._state.nd_hat = 0.0
+    algo._state.c_nd = 2.0 / 3.0
+    algo._state.k_int = 0.42
+    algo._state.k_ext = 0.03
+
+    saved = algo.save_state()
+
+    restored = AdaptiveTPIAlgorithm(name="test-estimator-persistence-restore", debug_mode=True)
+    restored.load_state(
+        saved,
+        current_cycle_min=5.0,
+        persisted_cycle_min=5.0,
+    )
+
+    diagnostics = restored.get_diagnostics()
+    assert diagnostics["a_samples_count"] == len(a_samples)
+    assert diagnostics["b_samples_count"] == len(b_samples)
+    assert diagnostics["c_a"] == pytest.approx(algo._state.c_a)
+    assert diagnostics["c_b"] == pytest.approx(algo._state.c_b)
+    assert diagnostics["b_converged"] is True
+    assert diagnostics["k_int"] != pytest.approx(0.6)
+    assert diagnostics["k_ext"] != pytest.approx(0.01)
 
 
 def test_bootstrap_stuck_exposes_explicit_freeze_reason() -> None:

@@ -79,18 +79,25 @@ def build_learning_window(
         total_duration_min = next_duration
         cycle_count += 1
 
-    end_observation = observations[end_index + 1]
-    if _window_touches_recent_setpoint_jump(
+    safe_start_index = _safe_window_start_after_recent_setpoint_jump(
         observations,
         start_index=start_index,
         end_index=end_index,
         guard_cycles=_setpoint_guard_cycles(nd_hat),
-    ):
+    )
+    if safe_start_index is None:
         return LearningWindowResult(
             sample=None,
             reason=f"{regime}_window_setpoint_changed",
             waiting_next_cycle=False,
         )
+    if safe_start_index != start_index:
+        start_index = safe_start_index
+        cycle_slice = observations[start_index : end_index + 1]
+        cycle_count = len(cycle_slice)
+        total_duration_min = sum(_duration_minutes(entry) for entry in cycle_slice)
+
+    end_observation = observations[end_index + 1]
 
     start_observation = observations[start_index]
     amplitude = end_observation.tin - start_observation.tin
@@ -194,20 +201,25 @@ def _setpoint_guard_cycles(nd_hat: float) -> int:
     return max(1, int(ceil(max(nd_hat, 0.0))))
 
 
-def _window_touches_recent_setpoint_jump(
+def _safe_window_start_after_recent_setpoint_jump(
     observations: tuple[CycleHistoryEntry, ...],
     *,
     start_index: int,
     end_index: int,
     guard_cycles: int,
-) -> bool:
-    """Return True when the latest setpoint jump is still too close to the window."""
+) -> int | None:
+    """Return the earliest safe start index after the latest setpoint jump."""
     latest_jump_following_index: int | None = None
     for index in range(0, end_index + 1):
         if _has_setpoint_jump(observations[index], observations[index + 1]):
             latest_jump_following_index = index + 1
 
     if latest_jump_following_index is None:
-        return False
+        return start_index
 
-    return start_index < (latest_jump_following_index + guard_cycles)
+    safe_start_index = latest_jump_following_index + guard_cycles
+    if start_index >= safe_start_index:
+        return start_index
+    if safe_start_index > end_index:
+        return None
+    return safe_start_index
