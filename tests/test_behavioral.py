@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from custom_components.vtherm_adaptive_tpi.algo import AdaptiveTPIAlgorithm
@@ -1066,7 +1068,8 @@ def test_gain_projection_matches_structural_formulas() -> None:
         nd_hat=2.0,
     )
 
-    assert k_int_target == pytest.approx(0.3125)
+    # tau_cl = max(3.0, 2.0*2.0) = 4.0, lambda_cl = exp(-0.25)
+    assert k_int_target == pytest.approx((1.0 - math.exp(-0.25) - 0.03) / 0.2, rel=1e-4)
     assert k_ext_target == pytest.approx(0.15)
 
     next_k_int, next_k_ext = project_gains(
@@ -1082,6 +1085,31 @@ def test_gain_projection_matches_structural_formulas() -> None:
     )
     assert next_k_int == pytest.approx(0.23)
     assert next_k_ext == pytest.approx(0.015)
+
+
+def test_gain_targets_lambda_follows_deadtime() -> None:
+    """Floor is active for nd<=1; higher deadtime detunes the loop (lower Kint)."""
+    a, b = 0.2, 0.03
+    k_int_nd0, _ = compute_gain_targets(a_hat=a, b_hat=b, nd_hat=0.0)
+    k_int_nd1, _ = compute_gain_targets(a_hat=a, b_hat=b, nd_hat=1.0)
+    k_int_nd4, _ = compute_gain_targets(a_hat=a, b_hat=b, nd_hat=4.0)
+    # Both nd=0 and nd=1 hit the floor tau_cl=3 -> same lambda_cl -> same Kint
+    assert k_int_nd0 == pytest.approx(k_int_nd1, rel=1e-9)
+    # Larger deadtime -> larger tau_cl -> larger lambda_cl -> smaller Kint
+    assert k_int_nd4 < k_int_nd0
+
+
+def test_gain_targets_kext_is_ratio() -> None:
+    """Kext_target equals b_hat/a_hat across a grid of inputs."""
+    cases = [
+        (0.2, 0.03, 0.0),
+        (0.1, 0.05, 2.0),
+        (0.05, 0.01, 4.0),
+        (0.3, 0.0, 1.0),
+    ]
+    for a, b, nd in cases:
+        _, k_ext = compute_gain_targets(a_hat=a, b_hat=b, nd_hat=nd)
+        assert k_ext == pytest.approx(b / a, rel=1e-9)
 
 
 def test_algo_exposes_deadtime_b_proxy_and_crosscheck_after_bootstrap_seed() -> None:

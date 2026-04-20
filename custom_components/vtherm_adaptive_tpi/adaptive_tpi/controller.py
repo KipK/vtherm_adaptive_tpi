@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import math
+
 from ..const import DEFAULT_KEXT, DEFAULT_KINT
 from .supervisor import PHASE_A, PHASE_B, PHASE_C, PHASE_D, PHASE_STARTUP
 
 A_MIN_PROJ = 1e-3
-C_D = 2.0
-LAMBDA_CL = 0.90
+TAU_CL_MIN_CYCLES = 3.0
+K_THETA = 2.0
 
 KINT_MIN = 0.05
 KINT_MAX = 1.2
@@ -43,6 +45,12 @@ def _saturate_delta(delta: float, max_delta: float) -> float:
     return _clamp(delta, -max_delta, max_delta)
 
 
+def _closed_loop_pole(nd_hat: float) -> float:
+    """Return the discrete closed-loop pole derived from the deadtime estimate."""
+    tau_cl = max(TAU_CL_MIN_CYCLES, K_THETA * max(nd_hat, 0.0))
+    return math.exp(-1.0 / tau_cl)
+
+
 def compute_gain_targets(
     *,
     a_hat: float,
@@ -51,10 +59,9 @@ def compute_gain_targets(
 ) -> tuple[float, float]:
     """Compute the structural gain targets from the current estimates."""
     a_proj = max(a_hat, A_MIN_PROJ)
+    lambda_cl = _closed_loop_pole(nd_hat)
     k_ext_target = b_hat / a_proj
-    k_int_nom = max(0.0, 1.0 - LAMBDA_CL - b_hat) / a_proj
-    gamma_d = 1.0 / (1.0 + C_D * max(nd_hat, 0.0) * max(b_hat, 0.0))
-    k_int_target = gamma_d * k_int_nom
+    k_int_target = max(0.0, 1.0 - lambda_cl - b_hat) / a_proj
     return k_int_target, k_ext_target
 
 
