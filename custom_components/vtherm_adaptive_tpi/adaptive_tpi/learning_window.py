@@ -128,7 +128,10 @@ def build_anchored_learning_window(
     cycle_count = 1
     while start_index > 0 and cycle_count < MAX_WINDOW_CYCLES:
         previous = observations[start_index - 1]
-        if not previous.is_estimator_informative or not _matches_regime(previous, regime):
+        if not previous.is_estimator_informative:
+            break
+        previous_regime = classify_cycle_regime(previous.applied_power)
+        if previous_regime != regime and previous_regime != WINDOW_REGIME_MIXED:
             break
         next_duration = total_duration_min + _duration_minutes(previous)
         if next_duration > MAX_WINDOW_DURATION_MIN:
@@ -136,6 +139,8 @@ def build_anchored_learning_window(
         start_index -= 1
         total_duration_min = next_duration
         cycle_count += 1
+        if previous_regime == WINDOW_REGIME_MIXED:
+            break
 
     safe_start_index = _safe_window_start_after_recent_setpoint_jump(
         observations,
