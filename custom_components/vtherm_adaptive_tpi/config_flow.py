@@ -12,6 +12,8 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_ADAPTIVE_TPI_DEBUG,
+    CONF_DEFAULT_KEXT,
+    CONF_DEFAULT_KINT,
     CONF_MINIMAL_ACTIVATION_DELAY,
     CONF_MINIMAL_DEACTIVATION_DELAY,
     CONF_RESPONSIVENESS,
@@ -58,6 +60,28 @@ def build_options_schema(defaults: dict[str, Any]) -> vol.Schema:
                     max=5,
                     step=1,
                     mode=selector.NumberSelectorMode.SLIDER,
+                )
+            ),
+            vol.Optional(
+                CONF_DEFAULT_KINT,
+                default=defaults[CONF_DEFAULT_KINT],
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0.05,
+                    max=1.2,
+                    step=0.05,
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Optional(
+                CONF_DEFAULT_KEXT,
+                default=defaults[CONF_DEFAULT_KEXT],
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0.0,
+                    max=0.3,
+                    step=0.005,
+                    mode=selector.NumberSelectorMode.BOX,
                 )
             ),
             vol.Optional(

@@ -112,11 +112,13 @@ def project_gains(
     c_a: float = 0.0,
     c_b: float = 0.0,
     tau_cl_min: float = TAU_CL_MIN_CYCLES,
+    default_kint: float = DEFAULT_KINT,
+    default_kext: float = DEFAULT_KEXT,
 ) -> tuple[float, float]:
     """Project the controller gains toward their structural targets."""
     if phase not in PHASE_GAIN_RATE_LIMITS:
         if phase == PHASE_STARTUP:
-            return DEFAULT_KINT, DEFAULT_KEXT
+            return default_kint, default_kext
         return k_int, k_ext
 
     structural_weight = _structural_gain_weight(
@@ -135,8 +137,8 @@ def project_gains(
         nd_hat=nd_hat,
         tau_cl_min=tau_cl_min,
     )
-    k_int_target = ((1.0 - structural_weight) * DEFAULT_KINT) + (structural_weight * k_int_target)
-    k_ext_target = ((1.0 - structural_weight) * DEFAULT_KEXT) + (structural_weight * k_ext_target)
+    k_int_target = ((1.0 - structural_weight) * default_kint) + (structural_weight * k_int_target)
+    k_ext_target = ((1.0 - structural_weight) * default_kext) + (structural_weight * k_ext_target)
 
     next_k_int = k_int + _saturate_delta(k_int_target - k_int, delta_kint_max)
     next_k_ext = k_ext + _saturate_delta(k_ext_target - k_ext, delta_kext_max)

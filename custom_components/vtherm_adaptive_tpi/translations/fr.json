@@ -8,10 +8,14 @@
           "minimal_activation_delay": "Délai minimal d'activation",
           "minimal_deactivation_delay": "Délai minimal de désactivation",
           "responsiveness": "Réactivité",
+          "default_kint": "Kint initial (gain intérieur)",
+          "default_kext": "Kext initial (gain extérieur)",
           "adaptive_tpi_debug": "Mode debug"
         },
         "data_description": {
-          "responsiveness": "Vitesse de suivi de consigne. 1 = agressif (montée rapide, risque de dépassement), 5 = conservateur (montée lente, robuste). Défaut : 3."
+          "responsiveness": "Vitesse de suivi de consigne. 1 = agressif (montée rapide, risque de dépassement), 5 = conservateur (montée lente, robuste). Défaut : 3.",
+          "default_kint": "Valeur de départ du gain proportionnel intérieur. L'algorithme l'adaptera au fil du temps.",
+          "default_kext": "Valeur de départ du gain feedforward extérieur. L'algorithme l'adaptera au fil du temps."
         }
       },
       "thermostat": {
@@ -21,10 +25,14 @@
           "minimal_activation_delay": "Délai minimal d'activation",
           "minimal_deactivation_delay": "Délai minimal de désactivation",
           "responsiveness": "Réactivité",
+          "default_kint": "Kint initial (gain intérieur)",
+          "default_kext": "Kext initial (gain extérieur)",
           "adaptive_tpi_debug": "Mode debug"
         },
         "data_description": {
-          "responsiveness": "Vitesse de suivi de consigne. 1 = agressif (montée rapide, risque de dépassement), 5 = conservateur (montée lente, robuste). Défaut : 3."
+          "responsiveness": "Vitesse de suivi de consigne. 1 = agressif (montée rapide, risque de dépassement), 5 = conservateur (montée lente, robuste). Défaut : 3.",
+          "default_kint": "Valeur de départ du gain proportionnel intérieur. L'algorithme l'adaptera au fil du temps.",
+          "default_kext": "Valeur de départ du gain feedforward extérieur. L'algorithme l'adaptera au fil du temps."
         }
       }
     },
@@ -40,10 +48,14 @@
           "minimal_activation_delay": "Délai minimal d'activation",
           "minimal_deactivation_delay": "Délai minimal de désactivation",
           "responsiveness": "Réactivité",
+          "default_kint": "Kint initial (gain intérieur)",
+          "default_kext": "Kext initial (gain extérieur)",
           "adaptive_tpi_debug": "Mode debug"
         },
         "data_description": {
-          "responsiveness": "Vitesse de suivi de consigne. 1 = agressif (montée rapide, risque de dépassement), 5 = conservateur (montée lente, robuste). Défaut : 3."
+          "responsiveness": "Vitesse de suivi de consigne. 1 = agressif (montée rapide, risque de dépassement), 5 = conservateur (montée lente, robuste). Défaut : 3.",
+          "default_kint": "Valeur de départ du gain proportionnel intérieur. L'algorithme l'adaptera au fil du temps.",
+          "default_kext": "Valeur de départ du gain feedforward extérieur. L'algorithme l'adaptera au fil du temps."
         }
       }
     }

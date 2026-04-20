@@ -9,6 +9,8 @@
           "minimal_activation_delay": "Minimal activation delay",
           "minimal_deactivation_delay": "Minimal deactivation delay",
           "responsiveness": "Responsiveness (1=aggressive … 5=conservative)",
+          "default_kint": "Initial Kint (indoor gain)",
+          "default_kext": "Initial Kext (outdoor gain)",
           "adaptive_tpi_debug": "Enable debug mode"
         }
       }

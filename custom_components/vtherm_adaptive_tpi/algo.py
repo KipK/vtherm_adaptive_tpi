@@ -56,6 +56,8 @@ class AdaptiveTPIAlgorithm:
         max_on_percent: float | None = None,
         debug_mode: bool = False,
         responsiveness: int = DEFAULT_RESPONSIVENESS,
+        default_kint: float = DEFAULT_KINT,
+        default_kext: float = DEFAULT_KEXT,
     ) -> None:
         """Initialize the algorithm scaffold."""
         self._name = name
@@ -63,9 +65,11 @@ class AdaptiveTPIAlgorithm:
         self._max_on_percent = max_on_percent
         idx = max(0, min(len(RESPONSIVENESS_TO_TAU_CL_MIN) - 1, responsiveness - 1))
         self._tau_cl_min: float = RESPONSIVENESS_TO_TAU_CL_MIN[idx]
+        self._default_kint = default_kint
+        self._default_kext = default_kext
         self._state = AdaptiveTPIState(
-            k_int=DEFAULT_KINT,
-            k_ext=DEFAULT_KEXT,
+            k_int=default_kint,
+            k_ext=default_kext,
         )
         self._supervisor = AdaptiveTPISupervisor(phase=self._state.bootstrap_phase)
         self._deadtime_model = DeadtimeModel()
@@ -395,8 +399,8 @@ class AdaptiveTPIAlgorithm:
     def reset_learning(self) -> None:
         """Reset all learned state and return to a fresh bootstrap runtime."""
         self._state = AdaptiveTPIState(
-            k_int=DEFAULT_KINT,
-            k_ext=DEFAULT_KEXT,
+            k_int=self._default_kint,
+            k_ext=self._default_kext,
         )
         self._supervisor.reset()
         self._deadtime_model.reset()
@@ -713,4 +717,6 @@ class AdaptiveTPIAlgorithm:
             c_a=self._state.c_a,
             c_b=self._state.c_b,
             tau_cl_min=self._tau_cl_min,
+            default_kint=self._default_kint,
+            default_kext=self._default_kext,
         )

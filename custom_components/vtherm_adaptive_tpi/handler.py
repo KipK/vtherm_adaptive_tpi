@@ -13,10 +13,14 @@ from .algo import AdaptiveTPIAlgorithm
 from .adaptive_tpi.state import PERSISTENCE_SCHEMA_VERSION
 from .const import (
     CONF_ADAPTIVE_TPI_DEBUG,
+    CONF_DEFAULT_KEXT,
+    CONF_DEFAULT_KINT,
     CONF_MINIMAL_ACTIVATION_DELAY,
     CONF_MINIMAL_DEACTIVATION_DELAY,
     CONF_RESPONSIVENESS,
     CONF_TARGET_VTHERM,
+    DEFAULT_KEXT,
+    DEFAULT_KINT,
     DEFAULT_OPTIONS,
     DEFAULT_RESPONSIVENESS,
     DOMAIN,
@@ -58,6 +62,8 @@ class AdaptiveTPIHandler:
             max_on_percent=getattr(t, "max_on_percent", None),
             debug_mode=bool(entry.get(CONF_ADAPTIVE_TPI_DEBUG, False)),
             responsiveness=int(entry.get(CONF_RESPONSIVENESS, DEFAULT_RESPONSIVENESS)),
+            default_kint=float(entry.get(CONF_DEFAULT_KINT, DEFAULT_KINT)),
+            default_kext=float(entry.get(CONF_DEFAULT_KEXT, DEFAULT_KEXT)),
         )
         self._refresh_published_diagnostics()
 
