@@ -1122,6 +1122,49 @@ def test_completed_on_cycle_routes_to_a_not_b(monkeypatch: pytest.MonkeyPatch) -
     assert diagnostics["a_samples_count"] >= 1
 
 
+def test_deadtime_history_keeps_committed_cycle_power(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The deadtime history must keep the cycle-start power captured for that cycle."""
+    algo = AdaptiveTPIAlgorithm(name="test-deadtime-cycle-power", debug_mode=True)
+    recorded_powers: list[float] = []
+
+    def fake_record_cycle(observation, **kwargs):
+        recorded_powers.append(observation.applied_power)
+        return DeadtimeSearchResult(
+            nd_hat=0.0,
+            c_nd=0.0,
+            locked=False,
+            best_candidate=None,
+            second_best_candidate=None,
+            best_candidate_a=None,
+            best_candidate_b=None,
+            candidate_costs={},
+            lock_reason="deadtime_insufficient_identifications",
+        )
+
+    monkeypatch.setattr(algo._deadtime_model, "record_cycle", fake_record_cycle)
+
+    algo.on_cycle_started(
+        on_time_sec=600.0,
+        off_time_sec=0.0,
+        on_percent=0.8,
+        hvac_mode="heat",
+        target_temp=21.0,
+        current_temp=20.0,
+        ext_current_temp=10.0,
+    )
+    algo.on_cycle_completed(
+        e_eff=0.2,
+        elapsed_ratio=1.0,
+        cycle_duration_min=10.0,
+        target_temp=21.0,
+        current_temp=20.2,
+        ext_current_temp=10.0,
+        hvac_mode="heat",
+    )
+
+    assert recorded_powers == [pytest.approx(0.8)]
+
+
 def test_disturbed_cycle_freezes_adaptation() -> None:
     """Disturbed runtime conditions should reject the cycle with an explicit reason."""
     algo = AdaptiveTPIAlgorithm(name="test-disturbed", debug_mode=True)

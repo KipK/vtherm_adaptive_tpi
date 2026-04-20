@@ -647,7 +647,7 @@ class AdaptiveTPIAlgorithm:
             tin=sample.current_temp,
             tout=sample.outdoor_temp,
             target_temp=sample.target_temp,
-            applied_power=self._state.on_percent,
+            applied_power=sample.applied_power,
         )
 
     def _learning_observations_with_terminal(
