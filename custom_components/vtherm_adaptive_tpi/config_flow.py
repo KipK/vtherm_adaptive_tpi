@@ -14,6 +14,7 @@ from .const import (
     CONF_ADAPTIVE_TPI_DEBUG,
     CONF_MINIMAL_ACTIVATION_DELAY,
     CONF_MINIMAL_DEACTIVATION_DELAY,
+    CONF_RESPONSIVENESS,
     CONF_TARGET_VTHERM,
     DEFAULT_OPTIONS,
     DOMAIN,
@@ -46,6 +47,17 @@ def build_options_schema(defaults: dict[str, Any]) -> vol.Schema:
                     step=1,
                     mode=selector.NumberSelectorMode.BOX,
                     unit_of_measurement="s",
+                )
+            ),
+            vol.Optional(
+                CONF_RESPONSIVENESS,
+                default=defaults[CONF_RESPONSIVENESS],
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1,
+                    max=5,
+                    step=1,
+                    mode=selector.NumberSelectorMode.SLIDER,
                 )
             ),
             vol.Optional(

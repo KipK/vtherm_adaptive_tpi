@@ -15,8 +15,10 @@ from .const import (
     CONF_ADAPTIVE_TPI_DEBUG,
     CONF_MINIMAL_ACTIVATION_DELAY,
     CONF_MINIMAL_DEACTIVATION_DELAY,
+    CONF_RESPONSIVENESS,
     CONF_TARGET_VTHERM,
     DEFAULT_OPTIONS,
+    DEFAULT_RESPONSIVENESS,
     DOMAIN,
 )
 
@@ -55,6 +57,7 @@ class AdaptiveTPIHandler:
             name=t.name,
             max_on_percent=getattr(t, "max_on_percent", None),
             debug_mode=bool(entry.get(CONF_ADAPTIVE_TPI_DEBUG, False)),
+            responsiveness=int(entry.get(CONF_RESPONSIVENESS, DEFAULT_RESPONSIVENESS)),
         )
         self._refresh_published_diagnostics()
 

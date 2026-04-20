@@ -21,7 +21,7 @@ from .adaptive_tpi.learning_window import (
 )
 from .adaptive_tpi.state import AdaptiveTPIState
 from .adaptive_tpi.supervisor import AdaptiveTPISupervisor, PHASE_A, PHASE_B
-from .const import DEFAULT_KEXT, DEFAULT_KINT
+from .const import DEFAULT_KEXT, DEFAULT_KINT, DEFAULT_RESPONSIVENESS, RESPONSIVENESS_TO_TAU_CL_MIN
 
 _LOGGER = logging.getLogger(__name__)
 _CONFIDENCE_DECAY_30_DAYS = 30
@@ -55,11 +55,14 @@ class AdaptiveTPIAlgorithm:
         name: str,
         max_on_percent: float | None = None,
         debug_mode: bool = False,
+        responsiveness: int = DEFAULT_RESPONSIVENESS,
     ) -> None:
         """Initialize the algorithm scaffold."""
         self._name = name
         self._debug_mode = debug_mode
         self._max_on_percent = max_on_percent
+        idx = max(0, min(len(RESPONSIVENESS_TO_TAU_CL_MIN) - 1, responsiveness - 1))
+        self._tau_cl_min: float = RESPONSIVENESS_TO_TAU_CL_MIN[idx]
         self._state = AdaptiveTPIState(
             k_int=DEFAULT_KINT,
             k_ext=DEFAULT_KEXT,
@@ -709,4 +712,5 @@ class AdaptiveTPIAlgorithm:
             c_nd=self._state.c_nd,
             c_a=self._state.c_a,
             c_b=self._state.c_b,
+            tau_cl_min=self._tau_cl_min,
         )

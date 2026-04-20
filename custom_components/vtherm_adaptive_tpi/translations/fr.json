@@ -7,7 +7,11 @@
         "data": {
           "minimal_activation_delay": "Délai minimal d'activation",
           "minimal_deactivation_delay": "Délai minimal de désactivation",
+          "responsiveness": "Réactivité",
           "adaptive_tpi_debug": "Mode debug"
+        },
+        "data_description": {
+          "responsiveness": "Vitesse de suivi de consigne. 1 = agressif (montée rapide, risque de dépassement), 5 = conservateur (montée lente, robuste). Défaut : 3."
         }
       },
       "thermostat": {
@@ -16,7 +20,11 @@
           "target_vtherm_unique_id": "Thermostat cible",
           "minimal_activation_delay": "Délai minimal d'activation",
           "minimal_deactivation_delay": "Délai minimal de désactivation",
+          "responsiveness": "Réactivité",
           "adaptive_tpi_debug": "Mode debug"
+        },
+        "data_description": {
+          "responsiveness": "Vitesse de suivi de consigne. 1 = agressif (montée rapide, risque de dépassement), 5 = conservateur (montée lente, robuste). Défaut : 3."
         }
       }
     },
@@ -31,7 +39,11 @@
         "data": {
           "minimal_activation_delay": "Délai minimal d'activation",
           "minimal_deactivation_delay": "Délai minimal de désactivation",
+          "responsiveness": "Réactivité",
           "adaptive_tpi_debug": "Mode debug"
+        },
+        "data_description": {
+          "responsiveness": "Vitesse de suivi de consigne. 1 = agressif (montée rapide, risque de dépassement), 5 = conservateur (montée lente, robuste). Défaut : 3."
         }
       }
     }

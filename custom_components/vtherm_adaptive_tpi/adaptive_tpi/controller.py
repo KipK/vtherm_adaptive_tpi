@@ -45,9 +45,9 @@ def _saturate_delta(delta: float, max_delta: float) -> float:
     return _clamp(delta, -max_delta, max_delta)
 
 
-def _closed_loop_pole(nd_hat: float) -> float:
+def _closed_loop_pole(nd_hat: float, tau_cl_min: float = TAU_CL_MIN_CYCLES) -> float:
     """Return the discrete closed-loop pole derived from the deadtime estimate."""
-    tau_cl = max(TAU_CL_MIN_CYCLES, K_THETA * max(nd_hat, 0.0))
+    tau_cl = max(tau_cl_min, K_THETA * max(nd_hat, 0.0))
     return math.exp(-1.0 / tau_cl)
 
 
@@ -56,10 +56,11 @@ def compute_gain_targets(
     a_hat: float,
     b_hat: float,
     nd_hat: float,
+    tau_cl_min: float = TAU_CL_MIN_CYCLES,
 ) -> tuple[float, float]:
     """Compute the structural gain targets from the current estimates."""
     a_proj = max(a_hat, A_MIN_PROJ)
-    lambda_cl = _closed_loop_pole(nd_hat)
+    lambda_cl = _closed_loop_pole(nd_hat, tau_cl_min=tau_cl_min)
     k_ext_target = b_hat / a_proj
     k_int_target = max(0.0, 1.0 - lambda_cl - b_hat) / a_proj
     return k_int_target, k_ext_target
@@ -110,6 +111,7 @@ def project_gains(
     c_nd: float = 0.0,
     c_a: float = 0.0,
     c_b: float = 0.0,
+    tau_cl_min: float = TAU_CL_MIN_CYCLES,
 ) -> tuple[float, float]:
     """Project the controller gains toward their structural targets."""
     if phase not in PHASE_GAIN_RATE_LIMITS:
@@ -131,6 +133,7 @@ def project_gains(
         a_hat=a_hat,
         b_hat=b_hat,
         nd_hat=nd_hat,
+        tau_cl_min=tau_cl_min,
     )
     k_int_target = ((1.0 - structural_weight) * DEFAULT_KINT) + (structural_weight * k_int_target)
     k_ext_target = ((1.0 - structural_weight) * DEFAULT_KEXT) + (structural_weight * k_ext_target)

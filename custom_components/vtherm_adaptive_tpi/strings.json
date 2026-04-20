@@ -8,6 +8,7 @@
           "target_vtherm_unique_id": "Target VTherm unique id",
           "minimal_activation_delay": "Minimal activation delay",
           "minimal_deactivation_delay": "Minimal deactivation delay",
+          "responsiveness": "Responsiveness (1=aggressive … 5=conservative)",
           "adaptive_tpi_debug": "Enable debug mode"
         }
       }
