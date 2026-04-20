@@ -233,6 +233,137 @@ Useful diagnostic groups:
   - `b_crosscheck_error`
   - `b_methods_consistent`
 
+## Bootstrap Phases
+
+The algorithm progresses through a sequence of phases controlled by `supervisor.py`.
+Each phase determines which learning operations are permitted and how aggressively gains may move.
+
+### Phase progression
+
+```
+STARTUP → A → B → C → D
+```
+
+Phases advance forward only. A reset (`reset_learning`) returns to STARTUP.
+A warm-start after a long absence may step back to A or B (see Warm Start section below).
+
+---
+
+### STARTUP
+
+Entry: on first initialization or after a full reset.
+
+- No cycle accepted yet.
+- Gains are held at `default_kint` / `default_kext`.
+- No deadtime search, no estimation.
+
+Exit: immediately on the first accepted valid cycle → advance to A.
+
+---
+
+### Phase A
+
+Entry: first valid cycle received.
+
+Purpose: accumulate enough observations to begin deadtime search.
+
+- Gains are frozen (rate limit = 0).
+- Deadtime search runs and accumulates history.
+- `b` estimation is blocked.
+- `a` estimation is blocked.
+
+Exit conditions (all required):
+- `valid_cycles_count ≥ 5`
+- `informative_deadtime_cycles_count ≥ 3`
+
+Stuck detection: if ≥ 10 valid cycles have passed and `c_nd` stays below 0.2, `last_freeze_reason` is set to `"insufficient_excitation_bootstrap"`.
+
+---
+
+### Phase B
+
+Entry: enough cycles for deadtime search.
+
+Purpose: identify the deadtime and converge `b`.
+
+- Gains move slowly: `delta_kint_max = 0.01`, `delta_kext_max = 0.002`.
+- Deadtime search continues.
+- `b` estimation is allowed (OFF windows only).
+- `a` estimation is still blocked.
+
+Exit conditions (all required):
+- `deadtime_locked = True`
+- `c_nd ≥ 0.6`
+- `b_converged = True`
+
+---
+
+### Phase C
+
+Entry: deadtime locked and `b` converged.
+
+Purpose: active learning — both `a` and `b` update, gains move toward structural targets.
+
+- Gains move faster: `delta_kint_max = 0.03`, `delta_kext_max = 0.005`.
+- `b` estimation continues (OFF windows).
+- `a` estimation is enabled (ON windows, requires deadtime locked and `b` converged).
+- `adaptive_cycles_since_phase_c` counter is reset to 0 on entry.
+
+Exit conditions (all required, checked after each estimator update):
+- `c_a ≥ 0.6` and `c_b ≥ 0.5`
+- `adaptive_cycles_since_phase_c ≥ 20`
+- `a` and `b` have each moved less than 10 % over the last 11 accepted cycles
+
+---
+
+### Phase D
+
+Entry: `a` and `b` have converged in Phase C.
+
+Purpose: steady-state long-term operation.
+
+- Gains move slowly again: `delta_kint_max = 0.01`, `delta_kext_max = 0.002`.
+- Both `a` and `b` continue to adapt slowly.
+- This is the nominal operating regime.
+
+No automatic exit. The phase stays D indefinitely unless a warm-start revalidation occurs.
+
+---
+
+### Gain rate limits summary
+
+| Phase   | `delta_kint_max` | `delta_kext_max` |
+|---------|------------------|------------------|
+| STARTUP | —  (fixed)       | —  (fixed)       |
+| A       | 0.0              | 0.0              |
+| B       | 0.01             | 0.002            |
+| C       | 0.03             | 0.005            |
+| D       | 0.01             | 0.002            |
+
+---
+
+### Warm start and phase revalidation
+
+When persistent state is loaded after a gap:
+
+- **Gap > 30 days**: confidences are halved (`decay_confidences(0.5)`). If `c_nd` falls below 0.6, `deadtime_locked` is cleared and the phase is stepped back to B.
+- **Gap > 90 days**: confidences are fully reset and the phase is stepped back to A.
+- **`cycle_min` changed**: deadtime model is discarded, confidences reset, phase stepped back to A (`"cycle_min_changed_revalidation"`).
+
+---
+
+### `deadtime_locked` and what clears it
+
+`deadtime_locked` is recomputed every cycle. It is `False` when any of the following is true:
+
+- fewer than 10 accepted cycles in the deadtime model (`"deadtime_insufficient_cycles"`)
+- best-candidate dominance ratio < 2.0 over the second-best (`"deadtime_insufficient_separation"`)
+- best candidate won fewer than 7 of the last 10 cycles (`"deadtime_inconsistent_winner"`)
+- confidence decay after > 30 days drops `c_nd` below 0.6
+- full confidence reset (gap > 90 days, or `cycle_min` change)
+
+The `last_freeze_reason` diagnostic always names the active blocker.
+
 ## Known Limits
 
 Current known limits of the prototype:
