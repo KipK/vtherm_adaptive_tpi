@@ -19,7 +19,7 @@ DEFAULT_ADAPTIVE_TPI_DEBUG = False
 DEFAULT_RESPONSIVENESS = 3
 
 DEFAULT_KINT = 0.6
-DEFAULT_KEXT = 0.01
+DEFAULT_KEXT = 0.02
 
 # Maps responsiveness level (1=aggressive … 5=conservative) to TAU_CL_MIN_CYCLES.
 # Indexed by responsiveness - 1.

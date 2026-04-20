@@ -54,8 +54,6 @@ def _make_step_observations(
 ) -> tuple[CycleHistoryEntry, ...]:
     """Build a synthetic step-response sequence with the given deadtime in cycles.
 
-    Parameters are chosen so the drift during the OFF phase stays below
-    MAX_PRE_STEP_DRIFT and the temperature reaches plateau before N_MAX_COLLECT.
     a=2.0, b=0.5, tout=4.9, tin_0=4.92 → equilibrium ~8.1°C, plateau in ~11 ON cycles.
     """
     a = 2.0

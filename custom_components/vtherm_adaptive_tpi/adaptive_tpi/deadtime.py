@@ -10,10 +10,9 @@ from typing import Any, Mapping
 CONFIDENCE_LOCK_THRESHOLD = 0.6
 
 # Step detection
-N_OFF_MIN = 3
-STEP_POWER_MIN = 0.60
-OFF_POWER_MAX = 0.10
-MAX_PRE_STEP_DRIFT = 0.03
+N_OFF_MIN = 2
+STEP_POWER_MIN = 0.70
+OFF_POWER_MAX = 0.15
 MAX_SETPOINT_JUMP = 0.3
 
 # Response collection
@@ -125,14 +124,6 @@ def _find_latest_step(
         off_slice = observations[step_index - N_OFF_MIN : step_index]
         if not all(e.applied_power <= OFF_POWER_MAX for e in off_slice):
             continue
-
-        if len(off_slice) >= 2:
-            drifts = [
-                abs(off_slice[k + 1].tin - off_slice[k].tin)
-                for k in range(len(off_slice) - 1)
-            ]
-            if sum(drifts) / len(drifts) > MAX_PRE_STEP_DRIFT:
-                continue
 
         guard_start = max(0, step_index - N_OFF_MIN)
         guard_end = min(n, step_index + 3)
