@@ -9,6 +9,7 @@ A_FLOOR = 1e-3
 CONFIDENCE_LOCK_THRESHOLD = 0.6
 LOCK_MIN_ACCEPTED_CYCLES = 10
 LOCK_MIN_DOMINANCE_RATIO = 2.0
+LOCK_MAINTAIN_DOMINANCE_RATIO = 1.5
 LOCK_RECENT_WINDOW = 10
 LOCK_RECENT_BEST_COUNT = 7
 
@@ -281,6 +282,7 @@ class DeadtimeModel:
             accepted_cycle_count=self.accepted_cycle_count,
             ratio=ratio,
             recent_best_count=recent_best_count,
+            currently_locked=self.locked,
         )
         locked = lock_reason is None
 
@@ -419,11 +421,13 @@ class DeadtimeModel:
         accepted_cycle_count: int,
         ratio: float,
         recent_best_count: int,
+        currently_locked: bool = False,
     ) -> str | None:
         """Return the explicit lock blocker when the coarse deadtime stays unlocked."""
         if accepted_cycle_count < LOCK_MIN_ACCEPTED_CYCLES:
             return "deadtime_insufficient_cycles"
-        if ratio < LOCK_MIN_DOMINANCE_RATIO:
+        ratio_threshold = LOCK_MAINTAIN_DOMINANCE_RATIO if currently_locked else LOCK_MIN_DOMINANCE_RATIO
+        if ratio < ratio_threshold:
             return "deadtime_insufficient_separation"
         if recent_best_count < LOCK_RECENT_BEST_COUNT:
             return "deadtime_inconsistent_winner"
