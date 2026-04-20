@@ -263,7 +263,9 @@ class AdaptiveTPIAlgorithm:
         self._state.deadtime_best_candidate = deadtime_result.best_candidate
         self._state.deadtime_second_best_candidate = deadtime_result.second_best_candidate
         self._state.deadtime_b_proxy = deadtime_result.best_candidate_b
-        self._state.deadtime_candidate_costs = deadtime_result.candidate_costs
+        self._state.deadtime_identification_count = len(self._deadtime_model._identifications)
+        self._state.deadtime_identification_qualities = deadtime_result.candidate_costs
+        self._state.deadtime_pending_step = self._deadtime_model._pending_step_index is not None
         self._supervisor.apply_deadtime_result(
             locked=deadtime_result.locked,
             confidence=deadtime_result.c_nd,
@@ -451,7 +453,9 @@ class AdaptiveTPIAlgorithm:
                 self._state.deadtime_best_candidate = None
                 self._state.deadtime_second_best_candidate = None
                 self._state.deadtime_b_proxy = None
-                self._state.deadtime_candidate_costs = {}
+                self._state.deadtime_identification_count = 0
+                self._state.deadtime_identification_qualities = {}
+                self._state.deadtime_pending_step = False
             estimator_restored = should_restore_deadtime and self._estimator.load_persisted_dict(
                 data.get("estimator_model")
             )
@@ -470,7 +474,9 @@ class AdaptiveTPIAlgorithm:
                 self._state.deadtime_best_candidate = deadtime_result.best_candidate
                 self._state.deadtime_second_best_candidate = deadtime_result.second_best_candidate
                 self._state.deadtime_b_proxy = deadtime_result.best_candidate_b
-                self._state.deadtime_candidate_costs = deadtime_result.candidate_costs
+                self._state.deadtime_identification_count = len(self._deadtime_model._identifications)
+                self._state.deadtime_identification_qualities = deadtime_result.candidate_costs
+                self._state.deadtime_pending_step = self._deadtime_model._pending_step_index is not None
             self._state.a_hat = self._estimator.a_hat
             self._state.b_hat = self._estimator.b_hat
             self._state.c_a = self._estimator.c_a

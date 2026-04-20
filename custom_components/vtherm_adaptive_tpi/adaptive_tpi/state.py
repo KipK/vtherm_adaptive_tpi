@@ -103,7 +103,9 @@ class AdaptiveTPIState:
     deadtime_b_proxy: float | None = None
     b_crosscheck_error: float | None = None
     b_methods_consistent: bool = False
-    deadtime_candidate_costs: dict[str, float] = field(default_factory=dict)
+    deadtime_identification_count: int = 0
+    deadtime_identification_qualities: dict[str, float] = field(default_factory=dict)
+    deadtime_pending_step: bool = False
     # These routing diagnostics describe the latest runtime decision only.
     # They are intentionally kept out of persistence so restarts do not restore
     # stale branch-selection information as if it were still current.
@@ -152,7 +154,7 @@ class AdaptiveTPIState:
             "deadtime_b_proxy": self.deadtime_b_proxy,
             "b_crosscheck_error": self.b_crosscheck_error,
             "b_methods_consistent": self.b_methods_consistent,
-            "deadtime_candidate_costs": dict(self.deadtime_candidate_costs),
+            "deadtime_identification_qualities": dict(self.deadtime_identification_qualities),
             "last_freeze_reason": self.last_freeze_reason,
         }
 
@@ -210,9 +212,11 @@ class AdaptiveTPIState:
         if isinstance(data.get("b_methods_consistent"), bool):
             self.b_methods_consistent = data["b_methods_consistent"]
 
-        candidate_costs = _coerce_str_float_dict(data.get("deadtime_candidate_costs"))
-        if candidate_costs is not None:
-            self.deadtime_candidate_costs = candidate_costs
+        identification_qualities = _coerce_str_float_dict(
+            data.get("deadtime_identification_qualities")
+        )
+        if identification_qualities is not None:
+            self.deadtime_identification_qualities = identification_qualities
 
         if isinstance(data.get("last_freeze_reason"), str):
             self.last_freeze_reason = data["last_freeze_reason"]
@@ -236,7 +240,9 @@ class AdaptiveTPIState:
         self.c_b = 0.0
         self.b_converged = False
         self.deadtime_locked = False
-        self.deadtime_candidate_costs = {}
+        self.deadtime_identification_count = 0
+        self.deadtime_identification_qualities = {}
+        self.deadtime_pending_step = False
         self.deadtime_best_candidate = None
         self.deadtime_second_best_candidate = None
         self.deadtime_b_proxy = None

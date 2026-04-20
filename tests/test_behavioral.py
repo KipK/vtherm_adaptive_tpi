@@ -1354,7 +1354,7 @@ def test_cycle_min_change_invalidates_persisted_warm_start() -> None:
     """A cycle duration change should rescale estimates and re-enter Phase A."""
     algo = AdaptiveTPIAlgorithm(name="test-persistence", debug_mode=True)
     algo._state.deadtime_locked = True
-    algo._state.deadtime_candidate_costs = {"1": 0.1}
+    algo._state.deadtime_identification_qualities = {"1": 0.1}
     algo._state.deadtime_best_candidate = 1.0
 
     algo.load_state(
@@ -1376,7 +1376,7 @@ def test_cycle_min_change_invalidates_persisted_warm_start() -> None:
     assert diagnostics["b_hat"] == pytest.approx(0.04)
     assert diagnostics["last_freeze_reason"] == "cycle_min_changed_revalidation"
     assert diagnostics["debug"]["deadtime_locked"] is False
-    assert diagnostics["deadtime_candidate_costs"] == {}
+    assert diagnostics["deadtime_identification_qualities"] == {}
 
 
 def test_warm_start_restores_deadtime_model_and_candidate_costs() -> None:
@@ -1395,7 +1395,7 @@ def test_warm_start_restores_deadtime_model_and_candidate_costs() -> None:
     algo._state.deadtime_locked = result.locked
     algo._state.deadtime_best_candidate = result.best_candidate
     algo._state.deadtime_second_best_candidate = result.second_best_candidate
-    algo._state.deadtime_candidate_costs = result.candidate_costs
+    algo._state.deadtime_identification_qualities = result.candidate_costs
     algo._state.deadtime_b_proxy = result.best_candidate_b
     algo._state.bootstrap_phase = PHASE_C
     algo._state.a_hat = 0.2
@@ -1415,7 +1415,7 @@ def test_warm_start_restores_deadtime_model_and_candidate_costs() -> None:
     diagnostics = restored.get_diagnostics()
     assert diagnostics["nd_hat"] == pytest.approx(result.nd_hat)
     assert diagnostics["c_nd"] == pytest.approx(result.c_nd)
-    assert diagnostics["deadtime_candidate_costs"] == result.candidate_costs
+    assert diagnostics["deadtime_identification_qualities"] == result.candidate_costs
     assert diagnostics["deadtime_b_proxy"] == pytest.approx(result.best_candidate_b)
     assert diagnostics["debug"]["deadtime_best_candidate"] == pytest.approx(result.best_candidate)
 
