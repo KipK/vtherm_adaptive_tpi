@@ -26,10 +26,7 @@ from .const import DEFAULT_KEXT, DEFAULT_KINT, DEFAULT_RESPONSIVENESS, RESPONSIV
 _LOGGER = logging.getLogger(__name__)
 _CONFIDENCE_DECAY_30_DAYS = 30
 _CONFIDENCE_DECAY_90_DAYS = 90
-_MIN_DEADTIME_SETPOINT_ERROR = 0.2
 _MIN_DEADTIME_OUTDOOR_DELTA = 1.0
-_MIN_DEADTIME_APPLIED_POWER = 0.15
-_MAX_DEADTIME_APPLIED_POWER = 0.85
 _MIN_ESTIMATOR_SETPOINT_ERROR = 0.2
 _MIN_ESTIMATOR_OUTDOOR_DELTA = 1.0
 _DEADTIME_B_PROXY_SEED_CONFIDENCE = 0.2
@@ -624,18 +621,9 @@ class AdaptiveTPIAlgorithm:
 
     @staticmethod
     def _is_deadtime_informative_cycle(sample: CycleSample) -> bool:
-        """Return True when one completed cycle is worth feeding to learning."""
-        setpoint_error = abs(sample.target_temp - sample.current_temp)
+        """Return True when thermal excitation is sufficient for deadtime learning."""
         outdoor_delta = abs(sample.current_temp - sample.outdoor_temp)
-        if setpoint_error < _MIN_DEADTIME_SETPOINT_ERROR:
-            return False
-        if outdoor_delta < _MIN_DEADTIME_OUTDOOR_DELTA:
-            return False
-        if sample.applied_power < _MIN_DEADTIME_APPLIED_POWER:
-            return False
-        if sample.applied_power > _MAX_DEADTIME_APPLIED_POWER:
-            return False
-        return True
+        return outdoor_delta >= _MIN_DEADTIME_OUTDOOR_DELTA
 
     @staticmethod
     def _is_estimator_informative_cycle(sample: CycleSample) -> bool:

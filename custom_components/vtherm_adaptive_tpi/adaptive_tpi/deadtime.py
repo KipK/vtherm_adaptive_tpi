@@ -1,32 +1,48 @@
-"""Deadtime search primitives for Adaptive TPI."""
+"""Deadtime identification for Adaptive TPI using exponentially-weighted moments."""
 
 from __future__ import annotations
 
+import math
+from collections import deque
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-A_FLOOR = 1e-3
 CONFIDENCE_LOCK_THRESHOLD = 0.6
-LOCK_MIN_ACCEPTED_CYCLES = 10
-LOCK_MIN_DOMINANCE_RATIO = 2.0
-LOCK_MAINTAIN_DOMINANCE_RATIO = 1.5
-LOCK_RECENT_WINDOW = 10
-LOCK_RECENT_BEST_COUNT = 7
 
-THERMOSTAT_CLASS_FAST_ELECTRIC = "fast_electric"
-THERMOSTAT_CLASS_HYDRONIC = "hydronic"
-THERMOSTAT_CLASS_UNKNOWN = "unknown"
+# Step detection
+N_OFF_MIN = 3
+STEP_POWER_MIN = 0.60
+OFF_POWER_MAX = 0.10
+MAX_PRE_STEP_DRIFT = 0.03
+MAX_SETPOINT_JUMP = 0.3
 
-CANDIDATE_SETS: dict[str, tuple[int, ...]] = {
-    THERMOSTAT_CLASS_FAST_ELECTRIC: (0, 1, 2, 3),
-    THERMOSTAT_CLASS_HYDRONIC: (0, 1, 2, 3, 4, 5, 6),
-    THERMOSTAT_CLASS_UNKNOWN: (0, 1, 2, 3, 4, 5, 6),
-}
+# Response collection
+STEP_ABORT_POWER = 0.50
+N_MAX_COLLECT = 20
+PLATEAU_WINDOW = 3
+PLATEAU_THRESHOLD = 0.02
+MIN_AMPLITUDE = 0.30
+TARGET_AMPLITUDE = 1.0
+
+# Confidence and locking
+N_HIST = 6
+N_LOCK_MIN = 3
+MAX_REL_SPREAD = 0.30
+
+# History management
+MAX_HISTORY_LEN = 100
+TRIM_TO_LEN = 60
+
+# b proxy
+MIN_B_DELTA_OUT = 1.0
+
+_RESPONSE_PENDING = "pending"
+_RESPONSE_ABORTED = "aborted"
 
 
 @dataclass(slots=True)
 class DeadtimeObservation:
-    """One accepted cycle sample used by the coarse deadtime search."""
+    """One accepted cycle sample used by the deadtime identifier."""
 
     tin: float
     tout: float
@@ -49,19 +65,18 @@ class CycleHistoryEntry:
 
 
 @dataclass(slots=True)
-class DeadtimeCandidateScore:
-    """Candidate deadtime score with its temporary constrained fit."""
+class StepIdentification:
+    """Result of one step-response identification."""
 
-    candidate: int
-    cost: float
-    a_c: float
-    b_c: float
-    sample_count: int
+    nd_cycles: float
+    quality: float
+    b_proxy: float | None
+    cycle_index: int
 
 
 @dataclass(slots=True)
 class DeadtimeSearchResult:
-    """Expose the coarse deadtime search outcome."""
+    """Expose the deadtime identification outcome."""
 
     nd_hat: float
     c_nd: float
@@ -74,18 +89,189 @@ class DeadtimeSearchResult:
     lock_reason: str | None
 
 
-class DeadtimeModel:
-    """Standalone coarse deadtime search state."""
+def _weighted_median(values: list[float], weights: list[float]) -> float:
+    """Return a weighted median of values."""
+    if not values:
+        return 0.0
+    if len(values) == 1:
+        return values[0]
+    total = sum(weights)
+    if total <= 0.0:
+        return sum(values) / len(values)
+    sorted_pairs = sorted(zip(values, weights), key=lambda p: p[0])
+    cumulative = 0.0
+    for val, w in sorted_pairs:
+        cumulative += w
+        if cumulative >= total / 2.0:
+            return val
+    return sorted_pairs[-1][0]
 
-    def __init__(self, thermostat_class: str = THERMOSTAT_CLASS_UNKNOWN) -> None:
-        """Initialize the deadtime search model."""
-        self._thermostat_class = thermostat_class
+
+def _find_latest_step(
+    observations: tuple[CycleHistoryEntry, ...],
+    last_processed_step_index: int,
+) -> int | None:
+    """Return the index of the latest unprocessed clean step or None."""
+    n = len(observations)
+    for step_index in range(n - 1, N_OFF_MIN, -1):
+        if step_index <= last_processed_step_index:
+            break
+
+        if observations[step_index].applied_power < STEP_POWER_MIN:
+            continue
+        if observations[step_index - 1].applied_power > OFF_POWER_MAX:
+            continue
+
+        off_slice = observations[step_index - N_OFF_MIN : step_index]
+        if not all(e.applied_power <= OFF_POWER_MAX for e in off_slice):
+            continue
+
+        if len(off_slice) >= 2:
+            drifts = [
+                abs(off_slice[k + 1].tin - off_slice[k].tin)
+                for k in range(len(off_slice) - 1)
+            ]
+            if sum(drifts) / len(drifts) > MAX_PRE_STEP_DRIFT:
+                continue
+
+        guard_start = max(0, step_index - N_OFF_MIN)
+        guard_end = min(n, step_index + 3)
+        guard_slice = observations[guard_start:guard_end]
+        if any(
+            abs(guard_slice[k].target_temp - guard_slice[k - 1].target_temp)
+            > MAX_SETPOINT_JUMP
+            for k in range(1, len(guard_slice))
+        ):
+            continue
+
+        return step_index
+
+    return None
+
+
+def _collect_response(
+    observations: tuple[CycleHistoryEntry, ...],
+    step_index: int,
+) -> list[CycleHistoryEntry] | str:
+    """Collect step-response cycles starting at step_index.
+
+    Returns the collected list when a plateau is detected,
+    _RESPONSE_PENDING while still accumulating, or _RESPONSE_ABORTED on failure.
+    """
+    response: list[CycleHistoryEntry] = []
+    for i in range(step_index, len(observations)):
+        entry = observations[i]
+
+        if i > step_index and entry.applied_power < STEP_ABORT_POWER:
+            return _RESPONSE_ABORTED
+
+        response.append(entry)
+
+        if len(response) > N_MAX_COLLECT:
+            return _RESPONSE_ABORTED
+
+        if len(response) >= PLATEAU_WINDOW + 1:
+            last_dts = [
+                abs(response[j].tin - response[j - 1].tin)
+                for j in range(len(response) - PLATEAU_WINDOW, len(response))
+            ]
+            if all(dt < PLATEAU_THRESHOLD for dt in last_dts):
+                return response
+
+    return _RESPONSE_PENDING
+
+
+def _compute_weighted_moments(
+    response: list[CycleHistoryEntry],
+) -> tuple[float, float] | None:
+    """Extract (nd_cycles, quality) from a collected step response.
+
+    Applies exponentially-weighted moments of the normalised step-response curve:
+        M0 = Σ w(k)·(1−y(k))·Δt,  M1 = Σ w(k)·t_k·(1−y(k))·Δt
+    then derives L = max(0, T_ar − T) where T_ar = M1/M0 and T = sqrt(M2/M0 − T_ar²).
+    Returns None when the response does not meet quality requirements.
+    """
+    if len(response) < 4:
+        return None
+
+    tin_0 = response[0].tin
+    tail_len = min(3, len(response))
+    tin_final_est = sum(e.tin for e in response[-tail_len:]) / tail_len
+    amplitude = tin_final_est - tin_0
+
+    if amplitude < MIN_AMPLITUDE:
+        return None
+
+    delta_ts = [e.cycle_duration_min * 60.0 for e in response]
+    mean_dt = sum(delta_ts) / len(delta_ts)
+
+    cumulative_times: list[float] = []
+    t = 0.0
+    for dt in delta_ts:
+        cumulative_times.append(t)
+        t += dt
+
+    alpha = 1.0 / max(t, 1.0)
+
+    m0 = m1 = m2 = 0.0
+    for entry, t_k, dt_k in zip(response, cumulative_times, delta_ts):
+        y_norm = (entry.tin - tin_0) / amplitude
+        complement = max(0.0, 1.0 - y_norm)
+        w = math.exp(-alpha * t_k)
+        m0 += w * complement * dt_k
+        m1 += w * t_k * complement * dt_k
+        m2 += w * t_k * t_k * complement * dt_k
+
+    if m0 < 1e-6:
+        return None
+
+    t_ar = m1 / m0
+    variance = m2 / m0 - t_ar * t_ar
+    time_const = math.sqrt(max(variance, 0.0))
+    l_seconds = max(0.0, t_ar - time_const)
+    nd_cycles = l_seconds / max(mean_dt, 1.0)
+
+    q_amplitude = min(1.0, amplitude / TARGET_AMPLITUDE)
+    n_on = sum(1 for e in response if e.applied_power >= STEP_POWER_MIN * 0.85)
+    q_power = n_on / len(response)
+    quality = q_amplitude * q_power
+
+    return nd_cycles, quality
+
+
+def _compute_b_proxy(
+    observations: tuple[CycleHistoryEntry, ...],
+    step_index: int,
+) -> float | None:
+    """Estimate the thermal loss coefficient from the OFF period preceding the step."""
+    off_slice = observations[max(0, step_index - N_OFF_MIN) : step_index]
+    measurements: list[float] = []
+    for k in range(len(off_slice) - 1):
+        delta_tin = off_slice[k + 1].tin - off_slice[k].tin
+        delta_out = off_slice[k].tin - off_slice[k].tout
+        if abs(delta_out) < MIN_B_DELTA_OUT:
+            continue
+        measurement = -delta_tin / delta_out
+        if measurement > 0.0:
+            measurements.append(measurement)
+    if not measurements:
+        return None
+    return sum(measurements) / len(measurements)
+
+
+class DeadtimeModel:
+    """Deadtime identifier using exponentially-weighted moments on step responses."""
+
+    def __init__(self) -> None:
+        """Initialize the deadtime identifier."""
         self._cycle_history: list[CycleHistoryEntry] = []
-        self._best_candidate_history: list[int] = []
-        self.nd_hat = 0.0
-        self.confidence = 0.0
-        self.locked = False
-        self.last_result = DeadtimeSearchResult(
+        self._identifications: deque[StepIdentification] = deque(maxlen=N_HIST)
+        self._last_processed_step_index: int = -1
+        self._pending_step_index: int | None = None
+        self.nd_hat: float = 0.0
+        self.confidence: float = 0.0
+        self.locked: bool = False
+        self.last_result: DeadtimeSearchResult = DeadtimeSearchResult(
             nd_hat=0.0,
             c_nd=0.0,
             locked=False,
@@ -94,37 +280,39 @@ class DeadtimeModel:
             best_candidate_a=None,
             best_candidate_b=None,
             candidate_costs={},
-            lock_reason="insufficient_data",
+            lock_reason="deadtime_insufficient_identifications",
         )
 
     @property
     def accepted_cycle_count(self) -> int:
-        """Return the number of accepted observations tracked by the model."""
-        return sum(1 for entry in self._cycle_history if entry.is_informative)
+        """Return the number of informative cycles in the current session."""
+        return sum(1 for e in self._cycle_history if e.is_informative)
 
     @property
     def accepted_observations(self) -> tuple[DeadtimeObservation, ...]:
-        """Expose the informative observations kept for backward-compatible callers."""
+        """Expose informative observations for backward-compatible callers."""
         return tuple(
             DeadtimeObservation(
-                tin=entry.tin,
-                tout=entry.tout,
-                target_temp=entry.target_temp,
-                applied_power=entry.applied_power,
+                tin=e.tin,
+                tout=e.tout,
+                target_temp=e.target_temp,
+                applied_power=e.applied_power,
             )
-            for entry in self._cycle_history
-            if entry.is_informative
+            for e in self._cycle_history
+            if e.is_informative
         )
 
     @property
     def cycle_history(self) -> tuple[CycleHistoryEntry, ...]:
-        """Expose the complete cycle history for temporally aligned learning."""
+        """Expose the complete cycle history for learning window construction."""
         return tuple(self._cycle_history)
 
     def reset(self) -> None:
-        """Reset the deadtime state."""
+        """Reset all state."""
         self._cycle_history.clear()
-        self._best_candidate_history.clear()
+        self._identifications.clear()
+        self._last_processed_step_index = -1
+        self._pending_step_index = None
         self.nd_hat = 0.0
         self.confidence = 0.0
         self.locked = False
@@ -137,85 +325,20 @@ class DeadtimeModel:
             best_candidate_a=None,
             best_candidate_b=None,
             candidate_costs={},
-            lock_reason="insufficient_data",
+            lock_reason="deadtime_insufficient_identifications",
         )
-
-    def to_persisted_dict(self) -> dict[str, Any]:
-        """Serialize the deadtime model so warm restarts preserve learning continuity."""
-        return {
-            "thermostat_class": self._thermostat_class,
-            "cycle_history": [
-                {
-                    "tin": entry.tin,
-                    "tout": entry.tout,
-                    "target_temp": entry.target_temp,
-                    "applied_power": entry.applied_power,
-                    "is_valid": entry.is_valid,
-                    "is_informative": entry.is_informative,
-                    "is_estimator_informative": entry.is_estimator_informative,
-                    "cycle_duration_min": entry.cycle_duration_min,
-                }
-                for entry in self._cycle_history
-            ],
-            "best_candidate_history": list(self._best_candidate_history),
-        }
-
-    def load_persisted_dict(self, data: Mapping[str, Any] | None) -> None:
-        """Restore the deadtime model from persisted payload."""
-        self.reset()
-        if not isinstance(data, Mapping):
-            return
-
-        thermostat_class = data.get("thermostat_class")
-        if isinstance(thermostat_class, str) and thermostat_class in CANDIDATE_SETS:
-            self._thermostat_class = thermostat_class
-
-        loaded_history: list[CycleHistoryEntry] = []
-        raw_history = data.get("cycle_history")
-        if isinstance(raw_history, list):
-            for raw_entry in raw_history:
-                if not isinstance(raw_entry, Mapping):
-                    continue
-                try:
-                    loaded_history.append(
-                        CycleHistoryEntry(
-                            tin=float(raw_entry["tin"]),
-                            tout=float(raw_entry["tout"]),
-                            target_temp=float(raw_entry["target_temp"]),
-                            applied_power=float(raw_entry["applied_power"]),
-                            is_valid=bool(raw_entry["is_valid"]),
-                            is_informative=bool(raw_entry["is_informative"]),
-                            is_estimator_informative=bool(raw_entry["is_estimator_informative"]),
-                            cycle_duration_min=float(raw_entry.get("cycle_duration_min", 5.0)),
-                        )
-                    )
-                except (KeyError, TypeError, ValueError):
-                    continue
-        self._cycle_history = loaded_history
-
-        raw_best_history = data.get("best_candidate_history")
-        if isinstance(raw_best_history, list):
-            self._best_candidate_history = [
-                int(candidate)
-                for candidate in raw_best_history
-                if isinstance(candidate, (int, float)) and int(candidate) in self.candidate_set()
-            ]
-
-        if self._cycle_history:
-            self.last_result = self.evaluate(track_winner=False)
 
     def record_accepted_observation(
         self,
         observation: DeadtimeObservation,
     ) -> DeadtimeSearchResult:
-        """Append an accepted observation and recompute coarse deadtime scores."""
-        self.last_result = self.record_cycle(
+        """Append an accepted observation and recompute deadtime."""
+        return self.record_cycle(
             observation,
             is_valid=True,
             is_informative=True,
             is_estimator_informative=True,
         )
-        return self.last_result
 
     def record_cycle(
         self,
@@ -226,8 +349,7 @@ class DeadtimeModel:
         is_informative: bool,
         is_estimator_informative: bool = False,
     ) -> DeadtimeSearchResult:
-        """Append one real cycle while preserving temporal alignment."""
-        previous_entry = self._cycle_history[-1] if self._cycle_history else None
+        """Append one cycle and trigger step detection when valid."""
         self._cycle_history.append(
             CycleHistoryEntry(
                 tin=observation.tin,
@@ -240,19 +362,57 @@ class DeadtimeModel:
                 is_estimator_informative=is_estimator_informative,
             )
         )
-        self.last_result = self.evaluate(
-            track_winner=bool(is_valid and previous_entry is not None and previous_entry.is_informative)
-        )
+        self._trim_history_if_needed()
+
+        if is_valid:
+            self.last_result = self.evaluate()
+
         return self.last_result
 
     def evaluate(self, *, track_winner: bool = True) -> DeadtimeSearchResult:
-        """Evaluate the candidate deadtime set over accepted observations."""
-        scores = self._score_candidates()
-        if not scores:
-            self.locked = False
+        """Scan for step identifications and recompute nd_hat."""
+        del track_winner
+        observations = tuple(self._cycle_history)
+
+        if self._pending_step_index is not None:
+            result = _collect_response(observations, self._pending_step_index)
+            if isinstance(result, list):
+                moments = _compute_weighted_moments(result)
+                if moments is not None:
+                    nd_cycles, quality = moments
+                    b_proxy = _compute_b_proxy(observations, self._pending_step_index)
+                    self._identifications.append(
+                        StepIdentification(
+                            nd_cycles=nd_cycles,
+                            quality=quality,
+                            b_proxy=b_proxy,
+                            cycle_index=self._pending_step_index,
+                        )
+                    )
+                self._last_processed_step_index = self._pending_step_index
+                self._pending_step_index = None
+            elif result == _RESPONSE_ABORTED:
+                self._last_processed_step_index = self._pending_step_index
+                self._pending_step_index = None
+
+        if self._pending_step_index is None:
+            step_index = _find_latest_step(
+                observations, self._last_processed_step_index
+            )
+            if step_index is not None:
+                self._pending_step_index = step_index
+
+        self.last_result = self._recompute_nd_hat()
+        return self.last_result
+
+    def _recompute_nd_hat(self) -> DeadtimeSearchResult:
+        """Derive nd_hat, confidence and lock state from stored identifications."""
+        if not self._identifications:
+            self.nd_hat = 0.0
             self.confidence = 0.0
-            self.last_result = DeadtimeSearchResult(
-                nd_hat=self.nd_hat,
+            self.locked = False
+            return DeadtimeSearchResult(
+                nd_hat=0.0,
                 c_nd=0.0,
                 locked=False,
                 best_candidate=None,
@@ -260,175 +420,119 @@ class DeadtimeModel:
                 best_candidate_a=None,
                 best_candidate_b=None,
                 candidate_costs={},
-                lock_reason="insufficient_data",
+                lock_reason="deadtime_insufficient_identifications",
             )
-            return self.last_result
 
-        sorted_scores = sorted(scores, key=lambda score: score.cost)
-        best_score = sorted_scores[0]
-        second_score = sorted_scores[1] if len(sorted_scores) > 1 else None
-        if track_winner:
-            self._best_candidate_history.append(best_score.candidate)
+        nd_values = [ident.nd_cycles for ident in self._identifications]
+        qualities = [ident.quality for ident in self._identifications]
+        nd_hat = _weighted_median(nd_values, qualities)
 
-        ratio = self._dominance_ratio(best_score.cost, second_score.cost if second_score else None)
-        consistency_all = self._consistency_score(best_score.candidate)
-        recent_best_count = self._recent_best_count(best_score.candidate)
-        confidence = self._compute_confidence(
-            accepted_cycle_count=self.accepted_cycle_count,
-            ratio=ratio,
-            consistency_all=consistency_all,
-        )
-        lock_reason = self._lock_reason(
-            accepted_cycle_count=self.accepted_cycle_count,
-            ratio=ratio,
-            recent_best_count=recent_best_count,
-            currently_locked=self.locked,
-        )
+        if len(nd_values) >= 2:
+            deviations = sorted(abs(nd - nd_hat) for nd in nd_values)
+            spread = deviations[len(deviations) // 2]
+            rel_spread = spread / max(nd_hat, 0.1)
+        else:
+            rel_spread = 1.0
+
+        n = len(nd_values)
+        count_score = min(1.0, n / N_LOCK_MIN)
+        spread_score = max(0.0, 1.0 - rel_spread / MAX_REL_SPREAD)
+        quality_score = sum(qualities) / len(qualities)
+        confidence = count_score * spread_score * quality_score
+
+        lock_reason: str | None = None
+        if n < N_LOCK_MIN:
+            lock_reason = "deadtime_insufficient_identifications"
+        elif rel_spread >= MAX_REL_SPREAD:
+            lock_reason = "deadtime_insufficient_separation"
+        elif confidence < CONFIDENCE_LOCK_THRESHOLD:
+            lock_reason = "deadtime_confidence_low"
+
         locked = lock_reason is None
-
-        self.nd_hat = float(best_score.candidate)
+        self.nd_hat = nd_hat
         self.confidence = confidence
         self.locked = locked
-        self.last_result = DeadtimeSearchResult(
-            nd_hat=self.nd_hat,
+
+        candidate_costs = {
+            str(i): ident.quality for i, ident in enumerate(self._identifications)
+        }
+        sorted_by_quality = sorted(
+            self._identifications, key=lambda x: x.quality, reverse=True
+        )
+        best = sorted_by_quality[0]
+        second = sorted_by_quality[1] if len(sorted_by_quality) > 1 else None
+
+        return DeadtimeSearchResult(
+            nd_hat=nd_hat,
             c_nd=confidence,
             locked=locked,
-            best_candidate=float(best_score.candidate),
-            second_best_candidate=(float(second_score.candidate) if second_score else None),
-            best_candidate_a=best_score.a_c,
-            best_candidate_b=best_score.b_c,
-            candidate_costs={str(score.candidate): score.cost for score in sorted_scores},
+            best_candidate=best.nd_cycles,
+            second_best_candidate=second.nd_cycles if second else None,
+            best_candidate_a=None,
+            best_candidate_b=best.b_proxy,
+            candidate_costs=candidate_costs,
             lock_reason=lock_reason,
         )
-        return self.last_result
 
-    def candidate_set(self) -> tuple[int, ...]:
-        """Return the coarse deadtime candidates for the configured thermostat class."""
-        return CANDIDATE_SETS.get(self._thermostat_class, CANDIDATE_SETS[THERMOSTAT_CLASS_UNKNOWN])
+    def _trim_history_if_needed(self) -> None:
+        """Remove oldest history entries and adjust tracked indices accordingly."""
+        if len(self._cycle_history) <= MAX_HISTORY_LEN:
+            return
+        trim_count = len(self._cycle_history) - TRIM_TO_LEN
+        del self._cycle_history[:trim_count]
+        self._last_processed_step_index = max(
+            -1, self._last_processed_step_index - trim_count
+        )
+        if self._pending_step_index is not None:
+            self._pending_step_index -= trim_count
+            if self._pending_step_index < 0:
+                self._pending_step_index = None
 
-    def _score_candidates(self) -> list[DeadtimeCandidateScore]:
-        """Score each candidate deadtime with a constrained least-squares fit."""
-        scores: list[DeadtimeCandidateScore] = []
-        for candidate in self.candidate_set():
-            rows = self._candidate_rows(candidate)
-            if len(rows) < 2:
-                continue
+    def to_persisted_dict(self) -> dict[str, Any]:
+        """Serialize identified deadtimes for warm restarts."""
+        return {
+            "identifications": [
+                {
+                    "nd_cycles": ident.nd_cycles,
+                    "quality": ident.quality,
+                    "b_proxy": ident.b_proxy,
+                    "cycle_index": ident.cycle_index,
+                }
+                for ident in self._identifications
+            ],
+            "last_processed_step_index": self._last_processed_step_index,
+        }
 
-            fit = self._solve_constrained_pair(rows)
-            if fit is None:
-                continue
+    def load_persisted_dict(self, data: Mapping[str, Any] | None) -> None:
+        """Restore identifications from a persisted snapshot."""
+        self.reset()
+        if not isinstance(data, Mapping):
+            return
+        # Silently discard the old candidate-regression format
+        if "cycle_history" in data:
+            return
 
-            a_c, b_c = fit
-            residual_sum = 0.0
-            for u_del, loss_term, delta_tin in rows:
-                residual = delta_tin - (a_c * u_del + b_c * loss_term)
-                residual_sum += residual * residual
+        raw_idents = data.get("identifications", [])
+        if isinstance(raw_idents, list):
+            for raw in raw_idents:
+                if not isinstance(raw, Mapping):
+                    continue
+                try:
+                    b_raw = raw.get("b_proxy")
+                    self._identifications.append(
+                        StepIdentification(
+                            nd_cycles=float(raw["nd_cycles"]),
+                            quality=float(raw["quality"]),
+                            b_proxy=float(b_raw) if b_raw is not None else None,
+                            cycle_index=int(raw.get("cycle_index", 0)),
+                        )
+                    )
+                except (KeyError, TypeError, ValueError):
+                    continue
 
-            scores.append(
-                DeadtimeCandidateScore(
-                    candidate=candidate,
-                    cost=residual_sum / len(rows),
-                    a_c=a_c,
-                    b_c=b_c,
-                    sample_count=len(rows),
-                )
-            )
+        lp = data.get("last_processed_step_index")
+        if isinstance(lp, int):
+            self._last_processed_step_index = lp
 
-        return scores
-
-    def _candidate_rows(self, candidate: int) -> list[tuple[float, float, float]]:
-        """Build the regression rows for one candidate deadtime."""
-        observations = self._cycle_history
-        rows: list[tuple[float, float, float]] = []
-        for index in range(candidate, len(observations) - 1):
-            current = observations[index]
-            next_observation = observations[index + 1]
-            if not current.is_informative or not next_observation.is_valid:
-                continue
-            delayed_source = observations[index - candidate]
-            delta_tin = next_observation.tin - current.tin
-            loss_term = -(current.tin - current.tout)
-            rows.append((delayed_source.applied_power, loss_term, delta_tin))
-        return rows
-
-    @staticmethod
-    def _solve_constrained_pair(
-        rows: list[tuple[float, float, float]],
-    ) -> tuple[float, float] | None:
-        """Solve the temporary least-squares pair under the simple physical bounds."""
-        sum_x1x1 = 0.0
-        sum_x1x2 = 0.0
-        sum_x2x2 = 0.0
-        sum_x1y = 0.0
-        sum_x2y = 0.0
-
-        for x1, x2, y in rows:
-            sum_x1x1 += x1 * x1
-            sum_x1x2 += x1 * x2
-            sum_x2x2 += x2 * x2
-            sum_x1y += x1 * y
-            sum_x2y += x2 * y
-
-        determinant = (sum_x1x1 * sum_x2x2) - (sum_x1x2 * sum_x1x2)
-        if abs(determinant) < 1e-9:
-            return None
-
-        a_c = ((sum_x1y * sum_x2x2) - (sum_x2y * sum_x1x2)) / determinant
-        b_c = ((sum_x1x1 * sum_x2y) - (sum_x1x2 * sum_x1y)) / determinant
-        if b_c >= 0.0:
-            return max(A_FLOOR, a_c), b_c
-
-        # When the unconstrained fit pushes b below zero, the physically valid
-        # projection is the one-dimensional refit with b fixed to 0.
-        if sum_x1x1 < 1e-9:
-            return A_FLOOR, 0.0
-        a_proj = sum_x1y / sum_x1x1
-        return max(A_FLOOR, a_proj), 0.0
-
-    @staticmethod
-    def _dominance_ratio(best_cost: float, second_cost: float | None) -> float:
-        """Return the ratio between the second-best and best candidate costs."""
-        if second_cost is None:
-            return 0.0
-        return second_cost / max(best_cost, 1e-9)
-
-    def _consistency_score(self, best_candidate: int) -> float:
-        """Return how consistently one candidate has been winning."""
-        if not self._best_candidate_history:
-            return 0.0
-        return self._best_candidate_history.count(best_candidate) / len(self._best_candidate_history)
-
-    def _recent_best_count(self, best_candidate: int) -> int:
-        """Return the number of recent accepted cycles won by the best candidate."""
-        recent_history = self._best_candidate_history[-LOCK_RECENT_WINDOW:]
-        return recent_history.count(best_candidate)
-
-    @staticmethod
-    def _compute_confidence(
-        *,
-        accepted_cycle_count: int,
-        ratio: float,
-        consistency_all: float,
-    ) -> float:
-        """Compute the coarse deadtime confidence from the spec baseline."""
-        cycle_factor = min(1.0, accepted_cycle_count / 20.0)
-        separation_factor = min(1.0, max(0.0, ratio - 1.0) / 1.0)
-        return cycle_factor * separation_factor * consistency_all
-
-    @staticmethod
-    def _lock_reason(
-        *,
-        accepted_cycle_count: int,
-        ratio: float,
-        recent_best_count: int,
-        currently_locked: bool = False,
-    ) -> str | None:
-        """Return the explicit lock blocker when the coarse deadtime stays unlocked."""
-        if accepted_cycle_count < LOCK_MIN_ACCEPTED_CYCLES:
-            return "deadtime_insufficient_cycles"
-        ratio_threshold = LOCK_MAINTAIN_DOMINANCE_RATIO if currently_locked else LOCK_MIN_DOMINANCE_RATIO
-        if ratio < ratio_threshold:
-            return "deadtime_insufficient_separation"
-        if recent_best_count < LOCK_RECENT_BEST_COUNT:
-            return "deadtime_inconsistent_winner"
-        return None
+        if self._identifications:
+            self.last_result = self._recompute_nd_hat()

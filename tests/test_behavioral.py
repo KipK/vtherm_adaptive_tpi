@@ -12,10 +12,16 @@ from custom_components.vtherm_adaptive_tpi.adaptive_tpi.controller import (
     project_gains,
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.deadtime import (
+    CONFIDENCE_LOCK_THRESHOLD,
     CycleHistoryEntry,
-    DeadtimeSearchResult,
     DeadtimeModel,
     DeadtimeObservation,
+    DeadtimeSearchResult,
+    StepIdentification,
+    _compute_b_proxy,
+    _compute_weighted_moments,
+    _collect_response,
+    _find_latest_step,
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.estimator import (
     ASample,
@@ -41,48 +47,45 @@ from custom_components.vtherm_adaptive_tpi.adaptive_tpi.supervisor import (
 )
 
 
-def _make_deadtime_lock_sequence() -> list[DeadtimeObservation]:
-    """Build a synthetic sequence whose best coarse deadtime is one cycle."""
-    observations: list[DeadtimeObservation] = []
-    tin = 19.0
-    tout = 10.0
-    target = 21.0
-    powers = [
-        0.0,
-        0.0,
-        0.7,
-        0.7,
-        0.7,
-        0.2,
-        0.0,
-        0.0,
-        0.8,
-        0.8,
-        0.3,
-        0.0,
-        0.0,
-        0.9,
-        0.9,
-        0.4,
-        0.0,
-        0.0,
-        0.75,
-        0.75,
-    ]
+def _make_step_observations(
+    nd: int = 2,
+    n_off: int = 4,
+    n_on: int = 15,
+) -> tuple[CycleHistoryEntry, ...]:
+    """Build a synthetic step-response sequence with the given deadtime in cycles.
 
-    for index, power in enumerate(powers):
-        observations.append(
-            DeadtimeObservation(
+    Parameters are chosen so the drift during the OFF phase stays below
+    MAX_PRE_STEP_DRIFT and the temperature reaches plateau before N_MAX_COLLECT.
+    a=2.0, b=0.5, tout=4.9, tin_0=4.92 → equilibrium ~8.1°C, plateau in ~11 ON cycles.
+    """
+    a = 2.0
+    b = 0.5
+    tout = 4.9
+    target = 15.0
+    tin = 4.92
+    entries: list[CycleHistoryEntry] = []
+    all_powers: list[float] = []
+
+    for k in range(n_off + n_on):
+        power = 0.0 if k < n_off else 0.8
+        delayed_k = k - nd
+        delayed_power = all_powers[delayed_k] if delayed_k >= 0 else 0.0
+        entries.append(
+            CycleHistoryEntry(
                 tin=tin,
                 tout=tout,
                 target_temp=target,
                 applied_power=power,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=True,
+                cycle_duration_min=5.0,
             )
         )
-        delayed_power = powers[index - 1] if index >= 1 else 0.0
-        tin += (0.4 * delayed_power) - (0.05 * (tin - tout))
+        all_powers.append(power)
+        tin = tin + a * delayed_power - b * (tin - tout)
 
-    return observations
+    return tuple(entries)
 
 
 def test_startup_with_no_history_keeps_bootstrap_defaults() -> None:
@@ -157,31 +160,170 @@ def test_off_mode_forces_zero_output() -> None:
     assert diagnostics["debug"]["last_cycle_classification"] == "rejected"
 
 
-def test_deadtime_lock_success_after_consistent_accepted_cycles() -> None:
-    """The coarse deadtime search should lock on a dominant one-cycle delay."""
+def test_step_detection_finds_clean_on_transition() -> None:
+    """A clean OFF→ON transition after stable OFF cycles should be detected."""
+    observations = _make_step_observations(nd=2, n_off=4, n_on=1)
+    step_index = _find_latest_step(observations, last_processed_step_index=-1)
+    assert step_index == 4
+
+
+def test_step_detection_ignores_insufficient_off_period() -> None:
+    """A step preceded by fewer than N_OFF_MIN OFF cycles must not be detected."""
+    observations = _make_step_observations(nd=2, n_off=2, n_on=1)
+    step_index = _find_latest_step(observations, last_processed_step_index=-1)
+    assert step_index is None
+
+
+def test_step_collection_ends_on_plateau() -> None:
+    """Collection must return the response list when a plateau is detected."""
+    observations = _make_step_observations(nd=2, n_off=4)
+    result = _collect_response(observations, step_index=4)
+    assert isinstance(result, list)
+    assert len(result) >= 4
+
+
+def test_step_collection_aborts_on_power_cut() -> None:
+    """An early power cut during collection must abort the identification."""
+    base = list(_make_step_observations(nd=2, n_off=4, n_on=5))
+    # Force power drop at index 7 (3 cycles into ON phase)
+    entry = base[7]
+    base[7] = CycleHistoryEntry(
+        tin=entry.tin,
+        tout=entry.tout,
+        target_temp=entry.target_temp,
+        applied_power=0.0,
+        is_valid=True,
+        is_informative=True,
+        is_estimator_informative=True,
+        cycle_duration_min=5.0,
+    )
+    result = _collect_response(tuple(base), step_index=4)
+    assert result == "aborted"
+
+
+def test_weighted_moments_returns_finite_nd() -> None:
+    """A valid FOPDT step response must yield a positive finite nd estimate."""
+    observations = _make_step_observations(nd=2, n_off=4)
+    result = _collect_response(observations, step_index=4)
+    assert isinstance(result, list)
+    moments = _compute_weighted_moments(result)
+    assert moments is not None
+    nd_cycles, quality = moments
+    assert math.isfinite(nd_cycles)
+    assert nd_cycles >= 0.0
+    assert 0.0 < quality <= 1.0
+
+
+def test_b_proxy_positive_from_off_period() -> None:
+    """The b proxy from the OFF period must be a positive finite value."""
+    # Simulate a cooling room: tin starts at 10°C, tout=0°C, b=0.25.
+    # |tin - tout| >> MIN_B_DELTA_OUT so b_proxy has signal to work with.
+    b_true = 0.25
+    tout = 0.0
+    tin = 10.0
+    entries: list[CycleHistoryEntry] = []
+    for _ in range(6):
+        entries.append(
+            CycleHistoryEntry(
+                tin=tin,
+                tout=tout,
+                target_temp=20.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=True,
+            )
+        )
+        tin = tin - b_true * (tin - tout)
+    b = _compute_b_proxy(tuple(entries), step_index=5)
+    assert b is not None
+    assert b == pytest.approx(b_true, rel=1e-3)
+    assert math.isfinite(b)
+
+
+def test_deadtime_model_locks_after_consistent_identifications() -> None:
+    """The model must lock once enough consistent identifications are stored."""
     model = DeadtimeModel()
-
-    for observation in _make_deadtime_lock_sequence():
-        result = model.record_accepted_observation(observation)
-
+    for i in range(3):
+        model._identifications.append(
+            StepIdentification(nd_cycles=2.0 + 0.05 * i, quality=0.85, b_proxy=0.03, cycle_index=i * 30)
+        )
+    result = model._recompute_nd_hat()
     assert result.locked is True
     assert result.lock_reason is None
-    assert result.nd_hat == pytest.approx(1.0)
-    assert result.best_candidate == pytest.approx(1.0)
-    assert result.best_candidate_b is not None
-    assert result.c_nd >= 0.6
+    assert result.nd_hat == pytest.approx(2.05, abs=0.1)
+    assert result.c_nd >= CONFIDENCE_LOCK_THRESHOLD
+    assert result.best_candidate_b == pytest.approx(0.03)
 
 
-def test_deadtime_lock_failure_stays_explicit_before_enough_cycles() -> None:
-    """The deadtime search should report why it is not yet lockable."""
+def test_deadtime_model_no_lock_before_enough_identifications() -> None:
+    """With fewer than N_LOCK_MIN identifications, lock_reason must be set."""
     model = DeadtimeModel()
-
-    for observation in _make_deadtime_lock_sequence()[:9]:
-        result = model.record_accepted_observation(observation)
-
+    model._identifications.append(
+        StepIdentification(nd_cycles=2.0, quality=0.9, b_proxy=None, cycle_index=0)
+    )
+    result = model._recompute_nd_hat()
     assert result.locked is False
-    assert result.lock_reason == "deadtime_insufficient_cycles"
-    assert result.c_nd < 0.6
+    assert result.lock_reason == "deadtime_insufficient_identifications"
+    assert result.c_nd < CONFIDENCE_LOCK_THRESHOLD
+
+
+def test_deadtime_model_no_lock_when_spread_too_high() -> None:
+    """High relative spread across identifications must prevent locking."""
+    model = DeadtimeModel()
+    for nd in [1.0, 5.0, 9.0]:
+        model._identifications.append(
+            StepIdentification(nd_cycles=nd, quality=0.9, b_proxy=None, cycle_index=0)
+        )
+    result = model._recompute_nd_hat()
+    assert result.locked is False
+    assert result.lock_reason in ("deadtime_insufficient_separation", "deadtime_confidence_low")
+
+
+def test_deadtime_model_nd_hat_can_be_non_integer() -> None:
+    """nd_hat must be a continuous float, not restricted to integer values."""
+    model = DeadtimeModel()
+    for nd in [1.3, 1.5, 1.7]:
+        model._identifications.append(
+            StepIdentification(nd_cycles=nd, quality=0.9, b_proxy=None, cycle_index=0)
+        )
+    result = model._recompute_nd_hat()
+    assert not float(result.nd_hat).is_integer() or result.nd_hat == pytest.approx(1.5)
+
+
+def test_deadtime_persistence_roundtrip() -> None:
+    """Identifications must survive a serialise / deserialise cycle unchanged."""
+    model = DeadtimeModel()
+    model._identifications.append(
+        StepIdentification(nd_cycles=2.3, quality=0.75, b_proxy=0.04, cycle_index=10)
+    )
+    model._last_processed_step_index = 10
+    model._recompute_nd_hat()
+
+    saved = model.to_persisted_dict()
+
+    model2 = DeadtimeModel()
+    model2.load_persisted_dict(saved)
+
+    assert len(model2._identifications) == 1
+    assert model2._identifications[0].nd_cycles == pytest.approx(2.3)
+    assert model2._identifications[0].quality == pytest.approx(0.75)
+    assert model2._identifications[0].b_proxy == pytest.approx(0.04)
+    assert model2._last_processed_step_index == 10
+    assert model2.nd_hat == pytest.approx(2.3)
+
+
+def test_deadtime_old_format_silently_ignored() -> None:
+    """A persisted dict with the old cycle_history key must be silently discarded."""
+    old_format = {
+        "cycle_history": [{"tin": 19.0, "tout": 10.0, "target_temp": 21.0, "applied_power": 0.7}],
+        "best_candidate_history": [1, 1, 1],
+    }
+    model = DeadtimeModel()
+    model.load_persisted_dict(old_format)
+    assert len(model._identifications) == 0
+    assert model.nd_hat == pytest.approx(0.0)
+    assert model.locked is False
 
 
 def test_estimator_updates_stay_bounded_under_extreme_samples() -> None:
@@ -240,48 +382,6 @@ def test_estimator_can_seed_b_from_deadtime_proxy() -> None:
     assert update.b_last_reason == "b_seeded_from_deadtime"
     assert update.i_b == pytest.approx(0.0)
 
-
-def test_deadtime_search_keeps_real_cycle_alignment_across_noninformative_gaps() -> None:
-    """Deadtime search must align delays on real cycles, not filtered observations."""
-    model = DeadtimeModel()
-    tin = 19.0
-    tout = 10.0
-    target = 21.0
-    powers = [0.0, 0.8, 0.0, 0.7, 0.0, 0.75, 0.0, 0.85, 0.0, 0.8, 0.0, 0.7]
-
-    for index, power in enumerate(powers):
-        result = model.record_cycle(
-            DeadtimeObservation(
-                tin=tin,
-                tout=tout,
-                target_temp=target,
-                applied_power=power,
-            ),
-            is_valid=True,
-            is_informative=(index % 2 == 0),
-            is_estimator_informative=True,
-        )
-        delayed_power = powers[index - 1] if index >= 1 else 0.0
-        tin += (0.35 * delayed_power) - (0.04 * (tin - tout))
-
-    assert result.nd_hat == pytest.approx(1.0)
-    assert result.best_candidate == pytest.approx(1.0)
-
-
-def test_deadtime_constrained_fit_refits_when_b_would_be_negative() -> None:
-    """The constrained fit should refit with b=0 instead of clamping the unconstrained solution."""
-    rows = [
-        (1.0, 1.0, 0.2),
-        (2.0, 1.0, 0.6),
-        (1.0, 2.0, 0.1),
-    ]
-
-    fit = DeadtimeModel._solve_constrained_pair(rows)
-
-    assert fit is not None
-    a_c, b_c = fit
-    assert a_c == pytest.approx(0.25)
-    assert b_c == pytest.approx(0.0)
 
 
 def test_learning_window_can_extend_across_multiple_off_cycles() -> None:
@@ -1116,8 +1216,10 @@ def test_algo_exposes_deadtime_b_proxy_and_crosscheck_after_bootstrap_seed() -> 
     """The runtime should surface the deadtime-side `b` proxy and seed `b_hat` from it."""
     algo = AdaptiveTPIAlgorithm(name="test-deadtime-b-proxy")
 
-    for observation in _make_deadtime_lock_sequence():
-        algo._deadtime_model.record_accepted_observation(observation)
+    for i in range(3):
+        algo._deadtime_model._identifications.append(
+            StepIdentification(nd_cycles=2.0 + 0.05 * i, quality=0.85, b_proxy=0.03, cycle_index=i * 30)
+        )
 
     result = algo._deadtime_model.evaluate()
     algo._state.deadtime_b_proxy = result.best_candidate_b
@@ -1238,8 +1340,11 @@ def test_warm_start_restores_deadtime_model_and_candidate_costs() -> None:
     """A normal warm start should preserve the deadtime model, not only the summary state."""
     algo = AdaptiveTPIAlgorithm(name="test-deadtime-persistence", debug_mode=True)
 
-    for observation in _make_deadtime_lock_sequence():
-        algo._deadtime_model.record_accepted_observation(observation)
+    for i in range(3):
+        algo._deadtime_model._identifications.append(
+            StepIdentification(nd_cycles=2.0 + 0.05 * i, quality=0.85, b_proxy=0.04, cycle_index=i * 30)
+        )
+    algo._deadtime_model.evaluate()
 
     result = algo._deadtime_model.last_result
     algo._state.nd_hat = result.nd_hat
