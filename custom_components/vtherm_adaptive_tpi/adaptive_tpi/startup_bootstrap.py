@@ -76,6 +76,17 @@ class StartupBootstrapController:
                 lower_target_temp=lower_target_temp,
                 command_on_percent=None,
             )
+        if (
+            deadtime_identification_count > 0
+            and self._stage in STARTUP_BOOTSTRAP_ACTIVE_STAGES
+        ):
+            self._stage = STARTUP_BOOTSTRAP_COMPLETED
+            self._completion_reason = "deadtime_identified"
+            return self._snapshot(
+                target_temp=target_temp,
+                lower_target_temp=lower_target_temp,
+                command_on_percent=None,
+            )
 
         if self._stage == STARTUP_BOOTSTRAP_IDLE:
             if deadtime_identification_count > 0:
