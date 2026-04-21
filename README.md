@@ -2,12 +2,6 @@
 
 Adaptive TPI plugin for [Versatile Thermostat](https://github.com/jmcollin78/versatile_thermostat), built on top of `vtherm_api`.
 
-## Work In Progress
-
-This project is still a **work in progress**.
-
-It is already usable for development and field experiments, but it is not yet a finished production-grade adaptive controller. Learning thresholds, diagnostics, and runtime behavior may still evolve as the plugin is validated on real traces.
-
 ## What It Does
 
 `vtherm_adaptive_tpi` provides an external `adaptive_tpi` proportional algorithm for Versatile Thermostat.
@@ -26,9 +20,7 @@ The plugin stays in the TPI family:
 - Versatile Thermostat still applies that command through its normal cycle scheduler
 - learning happens only from completed real cycles
 
-## Current State
-
-The current prototype already includes:
+The integration includes:
 
 - Home Assistant integration scaffolding
 - registration through `vtherm_api`
@@ -40,41 +32,48 @@ The current prototype already includes:
 - persistent runtime state
 - diagnostics exposed in the climate `specific_states`
 
-What is still evolving:
-
-- tuning of guards and thresholds
-- convergence behavior on real systems
-- documentation depth and polish
-
-## First Steps
-
-### 1. Treat it as an experimental adaptive plugin
-
-This repository is best used today for:
-
-- development
-- validation on real thermostat traces
-- debugging adaptive learning behavior
-
-### 2. Expect learning to start gradually
+## Learning Overview
 
 At startup, the plugin does not know the plant yet.
 
-A normal early progression is:
+The normal progression is:
 
 1. if no deadtime identification exists yet, startup bootstrap may force one or two clean OFF->ON attempts
 2. deadtime starts to emerge
 3. `b` starts learning from OFF windows
 4. `a` starts only later, once deadtime is credible and `b` is stable
 
-So it is normal at first to see:
+Typical early observations are:
 
 - `a_hat` frozen
 - `b_converged = false`
 - gains still close to defaults
 - `startup_bootstrap_active = true` during the initial forced sequence
 
-### 3. Use diagnostics to understand learning
+The runtime loop is:
+
+1. the controller computes `on_percent`
+2. the VT scheduler commits a real cycle
+3. the plugin records the cycle context
+4. at cycle end, the plugin validates the cycle for learning
+5. the deadtime model is updated
+6. short learning windows are reconstructed from cycle history
+7. `b` may learn from OFF windows
+8. `a` may learn from ON windows, once deadtime and `b` are ready
+9. `k_int` and `k_ext` are projected conservatively
+
+## Startup Bootstrap
+
+When deadtime is still unknown, startup may temporarily override the nominal command:
+
+- if already at or above setpoint, stay OFF until `target - 0.3°C`
+- if below setpoint, first heat to setpoint, then cool to `target - 0.3°C`
+- from `target - 0.3°C`, heat at `100%` until setpoint
+- each bootstrap threshold crossing forces an immediate cycle restart so the scheduler does not wait for the previous cycle boundary
+- if no deadtime identification is produced, retry once, then fall back to normal regulation
+- the forced OFF cooldown may also feed the initial `b` learning path even when it starts very close to setpoint
+
+## Diagnostics
 
 The plugin exposes learning diagnostics in the climate `specific_states`.
 
@@ -99,45 +98,13 @@ The most useful fields to inspect first are:
 - `cycle_completed_calls_count`
 - `accepted_cycles_count`
 
-## How It Works
-
-At a high level, the runtime loop is:
-
-1. the controller computes `on_percent`
-2. the VT scheduler commits a real cycle
-3. the plugin records the cycle context
-4. at cycle end, the plugin decides whether that cycle is valid for learning
-5. the deadtime model is updated
-6. short learning windows are reconstructed from real cycle history
-7. `b` may learn from OFF windows
-8. `a` may learn from ON windows, but only later in bootstrap
-9. `k_int` and `k_ext` are projected conservatively
-
-Important design points:
-
-- learning uses real completed cycles, not every sensor refresh
-- when deadtime is still unknown, startup may temporarily override the nominal command:
-  - if already at or above setpoint, stay OFF until `target - 0.3°C`
-  - if below setpoint, first heat to setpoint, then cool to `target - 0.3°C`
-  - from `target - 0.3°C`, heat at `100%` until setpoint
-  - each bootstrap threshold crossing forces an immediate cycle restart so the scheduler does not wait for the previous cycle boundary
-  - if no deadtime identification is produced, retry once, then fall back to normal regulation
-  - the forced OFF cooldown may also feed the initial `b` learning path even when it starts very close to setpoint
-- OFF and ON windows are handled separately
-- learning is intentionally conservative
-- diagnostics are first-class because they are essential for tuning and debugging
-
-## What To Expect In Practice
-
-Healthy early runtime often looks like this:
+Healthy learning often looks like this:
 
 - `nd_hat` starts moving before it is considered reliable
 - `b_hat` appears before `a_hat`
 - `b_samples_count` increases slowly
 - `a_last_reason` often stays at `deadtime_not_locked` for a while
 - `k_int` and `k_ext` stay near defaults until confidence is good enough
-
-This is normal for the current design.
 
 ## Main Documentation
 
@@ -155,7 +122,7 @@ If you want to go deeper:
 - [docs](vtherm_adaptive_tpi/docs)
   Project documentation
 - [tests](vtherm_adaptive_tpi/tests)
-  Behavioral tests for the prototype
+  Behavioral tests for the integration
 - [plans](vtherm_adaptive_tpi/plans)
   Design notes, mathematical specs, implementation plans, and review reports
 
@@ -166,4 +133,4 @@ This plugin depends on:
 - `versatile_thermostat`
 - `vtherm_api`
 
-The current manifest uses the main branch of `vtherm_api`, so development should be done with compatible versions of both sides.
+Development should be done with compatible versions of both sides.
