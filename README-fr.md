@@ -95,6 +95,7 @@ Les champs les plus utiles à inspecter en premier sont :
 - `cooling_rate_per_hour`
 - `cooling_rate_confidence`
 - `cooling_samples`
+- `sample_window_size`
 - `heating_rate_per_hour`
 - `heating_rate_confidence`
 - `heating_samples`
@@ -106,7 +107,7 @@ Un apprentissage sain ressemble souvent à ceci :
 
 - `deadtime_cycles` commence à bouger avant d'être considéré comme fiable
 - `cooling_rate_per_hour` apparaît avant `heating_rate_per_hour`
-- `cooling_samples` augmente lentement
+- `cooling_samples / sample_window_size` se remplit progressivement jusqu'à saturation de la fenêtre glissante
 - `last_runtime_blocker` reste souvent lié au temps mort ou à la convergence du refroidissement pendant un certain temps
 - `gain_indoor` et `gain_outdoor` restent proches des valeurs par défaut jusqu'à ce que la confiance soit suffisante
 

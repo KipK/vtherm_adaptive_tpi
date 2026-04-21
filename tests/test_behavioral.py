@@ -2152,6 +2152,8 @@ def test_warm_start_restores_estimator_history_and_keeps_adaptive_gains() -> Non
     diagnostics = restored.get_diagnostics()
     assert diagnostics["heating_samples"] == len(a_samples)
     assert diagnostics["cooling_samples"] == len(b_samples)
+    assert diagnostics["sample_window_size"] == 12
+    assert diagnostics["debug"]["sample_window_size"] == 12
     assert diagnostics["heating_rate_confidence"] == pytest.approx(algo._state.c_a)
     assert diagnostics["cooling_rate_confidence"] == pytest.approx(algo._state.c_b)
     assert diagnostics["cooling_rate_converged"] is True

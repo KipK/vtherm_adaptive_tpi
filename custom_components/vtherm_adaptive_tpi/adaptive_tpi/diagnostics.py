@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .estimator import WINDOW_HISTORY
 from .state import AdaptiveTPIState
 
 _PUBLIC_PHASE_NAMES = {
@@ -99,6 +100,7 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
         "cooling_rate_converged": state.b_converged,
         "heating_samples": state.a_samples_count,
         "cooling_samples": state.b_samples_count,
+        "sample_window_size": WINDOW_HISTORY,
         "heating_learning_enabled": state.a_learning_enabled,
         "startup_sequence_active": state.startup_bootstrap_active,
         "startup_sequence_stage": _public_startup_stage_name(
@@ -136,6 +138,7 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
             "i_b": state.i_b,
             "a_samples_count": state.a_samples_count,
             "b_samples_count": state.b_samples_count,
+            "sample_window_size": WINDOW_HISTORY,
             "a_last_reason": state.a_last_reason,
             "b_last_reason": state.b_last_reason,
             "last_learning_attempt_reason": state.last_learning_attempt_reason,

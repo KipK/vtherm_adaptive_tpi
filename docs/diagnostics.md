@@ -66,12 +66,14 @@ Interpretation:
 
 - `heating_samples`
 - `cooling_samples`
+- `sample_window_size`
 - `heating_learning_enabled`
 
 Interpretation:
 
 - `heating_samples` counts accepted `a` updates
 - `cooling_samples` counts accepted `b` updates
+- `sample_window_size` exposes the rolling estimator capacity used by both counters
 - `heating_learning_enabled` indicates whether runtime conditions allow `a` learning when an ON window is valid
 
 ### Startup sequence

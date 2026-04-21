@@ -101,6 +101,7 @@ The most useful fields to inspect first are:
 - `cooling_rate_per_hour`
 - `cooling_rate_confidence`
 - `cooling_samples`
+- `sample_window_size`
 - `heating_rate_per_hour`
 - `heating_rate_confidence`
 - `heating_samples`
@@ -112,7 +113,7 @@ Healthy learning often looks like this:
 
 - `deadtime_cycles` starts moving before it is considered reliable
 - `cooling_rate_per_hour` appears before `heating_rate_per_hour`
-- `cooling_samples` increases slowly
+- `cooling_samples / sample_window_size` fills progressively until the rolling window is full
 - `last_runtime_blocker` often stays related to deadtime or cooling convergence for a while
 - `gain_indoor` and `gain_outdoor` stay near defaults until confidence is good enough
 

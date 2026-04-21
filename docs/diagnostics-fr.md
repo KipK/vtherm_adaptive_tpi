@@ -65,12 +65,14 @@ Interprétation :
 
 - `heating_samples`
 - `cooling_samples`
+- `sample_window_size`
 - `heating_learning_enabled`
 
 Interprétation :
 
 - `heating_samples` compte les mises à jour `a` acceptées
 - `cooling_samples` compte les mises à jour `b` acceptées
+- `sample_window_size` expose la capacité de la fenêtre glissante utilisée par les deux compteurs
 - `heating_learning_enabled` indique si les conditions d'exécution permettent l'apprentissage `a` quand une fenêtre ON est valide
 
 ### Séquence de démarrage
