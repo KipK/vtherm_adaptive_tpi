@@ -41,6 +41,8 @@ Aucune donnée `specific_states.adaptive_tpi` trouvée pour `{{ entity }}`.
 {% set deadtime_minutes = diag.get('deadtime_minutes') %}
 {% set deadtime_cycles = diag.get('deadtime_cycles') %}
 {% set deadtime_confidence = diag.get('deadtime_confidence') %}
+{% set gain_indoor = diag.get('gain_indoor') %}
+{% set gain_outdoor = diag.get('gain_outdoor') %}
 {% set control_rate = diag.get('control_rate_per_hour') %}
 {% set drift_rate = diag.get('drift_rate_per_hour') %}
 {% set tau_h = diag.get('thermal_time_constant_hours') %}
@@ -61,6 +63,8 @@ Aucune donnée `specific_states.adaptive_tpi` trouvée pour `{{ entity }}`.
 {% set next_cycle_text = ((next_cycle * 100) | round(0) ~ ' %') if next_cycle is not none else 'Indisponible' %}
 {% set deadtime_text = (deadtime_minutes | round(1) ~ ' min') if deadtime_minutes is not none else ((deadtime_cycles | round(2) ~ ' cycle(s)') if deadtime_cycles is not none else 'Non mesuré') %}
 {% set deadtime_conf_text = ((deadtime_confidence * 100) | round(0) ~ ' %') if deadtime_confidence is not none else 'Indisponible' %}
+{% set gain_indoor_text = (gain_indoor | round(3)) if gain_indoor is not none else 'Indisponible' %}
+{% set gain_outdoor_text = (gain_outdoor | round(3)) if gain_outdoor is not none else 'Indisponible' %}
 {% set control_rate_text = (control_rate | round(2) ~ ' °C/h') if control_rate is not none else 'En attente' %}
 {% set drift_rate_text = (drift_rate | round(3) ~ ' 1/h') if drift_rate is not none else 'En attente' %}
 {% set tau_text = (tau_h | round(2) ~ ' h') if tau_h is not none else 'En attente' %}
@@ -81,6 +85,8 @@ Aucune donnée `specific_states.adaptive_tpi` trouvée pour `{{ entity }}`.
 |---|---|
 | ⏳ Temps mort | **{{ deadtime_text }}** |
 | 🎯 Confiance temps mort | **{{ deadtime_conf_text }}** |
+| 🎚️ Gain intérieur | **{{ gain_indoor_text }}** |
+| 🌤️ Gain extérieur | **{{ gain_outdoor_text }}** |
 | {{ icon_control }} {{ label_control }} | **{{ control_rate_text }}** |
 | {{ icon_drift }} {{ label_drift }} | **{{ drift_rate_text }}** |
 | 🏠 Constante thermique | **{{ tau_text }}** |
