@@ -374,15 +374,27 @@ def test_deadtime_model_locks_after_consistent_identifications() -> None:
     assert result.best_candidate_b == pytest.approx(0.03)
 
 
-def test_deadtime_model_no_lock_before_enough_identifications() -> None:
-    """With fewer than N_LOCK_MIN identifications, lock_reason must be set."""
+def test_deadtime_model_locks_on_single_clean_identification() -> None:
+    """A single high-quality identification must be enough to lock."""
     model = DeadtimeModel()
     model._identifications.append(
         StepIdentification(nd_cycles=2.0, quality=0.9, b_proxy=None, cycle_index=0)
     )
     result = model._recompute_nd_hat()
+    assert result.locked is True
+    assert result.lock_reason is None
+    assert result.c_nd >= CONFIDENCE_LOCK_THRESHOLD
+
+
+def test_deadtime_model_no_lock_when_single_identification_quality_too_low() -> None:
+    """A single identification with quality below threshold must not lock."""
+    model = DeadtimeModel()
+    model._identifications.append(
+        StepIdentification(nd_cycles=2.0, quality=0.3, b_proxy=None, cycle_index=0)
+    )
+    result = model._recompute_nd_hat()
     assert result.locked is False
-    assert result.lock_reason == "deadtime_insufficient_identifications"
+    assert result.lock_reason == "deadtime_confidence_low"
     assert result.c_nd < CONFIDENCE_LOCK_THRESHOLD
 
 

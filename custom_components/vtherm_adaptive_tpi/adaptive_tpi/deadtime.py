@@ -24,7 +24,7 @@ OFF_POWER_CLEAN = 0.05
 
 # Aggregation
 N_HIST = 6
-N_LOCK_MIN = 3
+N_LOCK_MIN = 1
 SPREAD_MAX_CYCLES = 1.0
 
 # History management
@@ -118,16 +118,6 @@ def _find_latest_step(
         if observations[step_index].applied_power < STEP_POWER_MIN_NEW:
             continue
         if observations[step_index - 1].applied_power > OFF_POWER_MAX_NEW:
-            continue
-
-        guard_start = max(0, step_index - 1)
-        guard_end = min(n, step_index + 2)
-        guard_slice = observations[guard_start:guard_end]
-        if any(
-            abs(guard_slice[k].target_temp - guard_slice[k - 1].target_temp)
-            > MAX_SETPOINT_JUMP
-            for k in range(1, len(guard_slice))
-        ):
             continue
 
         return step_index
@@ -370,7 +360,7 @@ class DeadtimeModel:
             deviations = sorted(abs(nd - nd_hat) for nd in nd_values)
             spread = deviations[len(deviations) // 2]
         else:
-            spread = float("inf")
+            spread = 0.0
 
         n = len(nd_values)
         count_score = min(1.0, n / N_LOCK_MIN)
