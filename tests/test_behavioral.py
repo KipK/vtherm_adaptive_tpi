@@ -43,14 +43,6 @@ from custom_components.vtherm_adaptive_tpi.adaptive_tpi.learning_window import (
     build_learning_window,
     classify_cycle_regime,
 )
-from custom_components.vtherm_adaptive_tpi.adaptive_tpi.startup_bootstrap import (
-    STARTUP_BOOTSTRAP_ABANDONED,
-    STARTUP_BOOTSTRAP_COMPLETED,
-    STARTUP_BOOTSTRAP_COOLDOWN,
-    STARTUP_BOOTSTRAP_IDLE,
-    STARTUP_BOOTSTRAP_PREHEAT,
-    STARTUP_BOOTSTRAP_REHEAT,
-)
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.supervisor import (
     PHASE_A,
     PHASE_B,
@@ -103,19 +95,18 @@ def test_startup_with_no_history_keeps_bootstrap_defaults() -> None:
 
     diagnostics = algo.get_diagnostics()
 
-    assert diagnostics["bootstrap_phase"] == "startup"
-    assert diagnostics["accepted_cycles_count"] == 0
-    assert diagnostics["k_int"] == pytest.approx(0.6)
-    assert diagnostics["k_ext"] == pytest.approx(0.02)
-    assert diagnostics["deadtime_min"] is None
-    assert diagnostics["startup_bootstrap_active"] is False
-    assert diagnostics["startup_bootstrap_stage"] == STARTUP_BOOTSTRAP_IDLE
-    assert diagnostics["startup_bootstrap_attempt"] == 0
-    assert diagnostics["startup_bootstrap_max_attempts"] == 2
-    assert diagnostics["a_hat_per_hour"] is None
-    assert diagnostics["b_hat_per_hour"] is None
-    assert diagnostics["tau_h"] is None
-    assert diagnostics["tau_min"] is None
+    assert diagnostics["adaptive_phase"] == "startup"
+    assert diagnostics["gain_indoor"] == pytest.approx(0.6)
+    assert diagnostics["gain_outdoor"] == pytest.approx(0.02)
+    assert diagnostics["deadtime_minutes"] is None
+    assert diagnostics["startup_sequence_active"] is False
+    assert diagnostics["startup_sequence_stage"] == "idle"
+    assert diagnostics["startup_sequence_attempt"] == 0
+    assert diagnostics["startup_sequence_max_attempts"] == 2
+    assert diagnostics["heating_rate_per_hour"] is None
+    assert diagnostics["cooling_rate_per_hour"] is None
+    assert diagnostics["thermal_time_constant_hours"] is None
+    assert diagnostics["thermal_time_constant_minutes"] is None
 
 
 def test_startup_bootstrap_cools_down_immediately_when_temperature_is_at_setpoint() -> None:
@@ -132,11 +123,11 @@ def test_startup_bootstrap_cools_down_immediately_when_temperature_is_at_setpoin
 
     diagnostics = algo.get_diagnostics()
     assert algo.on_percent == pytest.approx(0.0)
-    assert diagnostics["startup_bootstrap_active"] is True
-    assert diagnostics["startup_bootstrap_stage"] == STARTUP_BOOTSTRAP_COOLDOWN
-    assert diagnostics["startup_bootstrap_attempt"] == 1
-    assert diagnostics["startup_bootstrap_lower_target_temp"] == pytest.approx(19.7)
-    assert diagnostics["startup_bootstrap_command_on_percent"] == pytest.approx(0.0)
+    assert diagnostics["startup_sequence_active"] is True
+    assert diagnostics["startup_sequence_stage"] == "cooling_below_target"
+    assert diagnostics["startup_sequence_attempt"] == 1
+    assert diagnostics["startup_sequence_cooling_temperature"] == pytest.approx(19.7)
+    assert diagnostics["startup_sequence_requested_power"] == pytest.approx(0.0)
 
 
 def test_startup_bootstrap_retries_a_second_deadtime_cycle_when_first_one_fails() -> None:
@@ -152,7 +143,7 @@ def test_startup_bootstrap_retries_a_second_deadtime_cycle_when_first_one_fails(
     )
     diagnostics = algo.get_diagnostics()
     assert algo.on_percent == pytest.approx(1.0)
-    assert diagnostics["startup_bootstrap_stage"] == STARTUP_BOOTSTRAP_PREHEAT
+    assert diagnostics["startup_sequence_stage"] == "heating_to_target"
 
     algo.calculate(
         target_temp=20.0,
@@ -172,7 +163,7 @@ def test_startup_bootstrap_retries_a_second_deadtime_cycle_when_first_one_fails(
     )
     diagnostics = algo.get_diagnostics()
     assert algo.on_percent == pytest.approx(1.0)
-    assert diagnostics["startup_bootstrap_stage"] == STARTUP_BOOTSTRAP_REHEAT
+    assert diagnostics["startup_sequence_stage"] == "reheating_to_target"
 
     algo.calculate(
         target_temp=20.0,
@@ -184,10 +175,10 @@ def test_startup_bootstrap_retries_a_second_deadtime_cycle_when_first_one_fails(
 
     diagnostics = algo.get_diagnostics()
     assert algo.on_percent == pytest.approx(0.0)
-    assert diagnostics["startup_bootstrap_active"] is True
-    assert diagnostics["startup_bootstrap_stage"] == STARTUP_BOOTSTRAP_COOLDOWN
-    assert diagnostics["startup_bootstrap_attempt"] == 2
-    assert diagnostics["startup_bootstrap_completion_reason"] is None
+    assert diagnostics["startup_sequence_active"] is True
+    assert diagnostics["startup_sequence_stage"] == "cooling_below_target"
+    assert diagnostics["startup_sequence_attempt"] == 2
+    assert diagnostics["startup_sequence_completion_reason"] is None
 
 
 def test_startup_bootstrap_completes_after_first_identified_deadtime_cycle() -> None:
@@ -218,9 +209,9 @@ def test_startup_bootstrap_completes_after_first_identified_deadtime_cycle() -> 
     )
 
     diagnostics = algo.get_diagnostics()
-    assert diagnostics["startup_bootstrap_active"] is False
-    assert diagnostics["startup_bootstrap_stage"] == STARTUP_BOOTSTRAP_COMPLETED
-    assert diagnostics["startup_bootstrap_completion_reason"] == "deadtime_identified"
+    assert diagnostics["startup_sequence_active"] is False
+    assert diagnostics["startup_sequence_stage"] == "completed"
+    assert diagnostics["startup_sequence_completion_reason"] == "deadtime_identified"
     assert algo.on_percent == pytest.approx(0.0)
 
 
@@ -251,8 +242,8 @@ def test_startup_bootstrap_exits_if_deadtime_arrives_after_reheat_cycle_closed()
     )
 
     diagnostics = algo.get_diagnostics()
-    assert diagnostics["startup_bootstrap_stage"] == STARTUP_BOOTSTRAP_COOLDOWN
-    assert diagnostics["startup_bootstrap_attempt"] == 2
+    assert diagnostics["startup_sequence_stage"] == "cooling_below_target"
+    assert diagnostics["startup_sequence_attempt"] == 2
 
     algo._state.deadtime_identification_count = 1
     algo.calculate(
@@ -264,9 +255,9 @@ def test_startup_bootstrap_exits_if_deadtime_arrives_after_reheat_cycle_closed()
     )
 
     diagnostics = algo.get_diagnostics()
-    assert diagnostics["startup_bootstrap_active"] is False
-    assert diagnostics["startup_bootstrap_stage"] == STARTUP_BOOTSTRAP_COMPLETED
-    assert diagnostics["startup_bootstrap_completion_reason"] == "deadtime_identified"
+    assert diagnostics["startup_sequence_active"] is False
+    assert diagnostics["startup_sequence_stage"] == "completed"
+    assert diagnostics["startup_sequence_completion_reason"] == "deadtime_identified"
     assert algo.on_percent == pytest.approx(0.0)
 
 
@@ -311,10 +302,10 @@ def test_startup_bootstrap_abandons_after_second_failed_deadtime_cycle() -> None
     )
 
     diagnostics = algo.get_diagnostics()
-    assert diagnostics["startup_bootstrap_active"] is False
-    assert diagnostics["startup_bootstrap_stage"] == STARTUP_BOOTSTRAP_ABANDONED
+    assert diagnostics["startup_sequence_active"] is False
+    assert diagnostics["startup_sequence_stage"] == "abandoned"
     assert (
-        diagnostics["startup_bootstrap_completion_reason"]
+        diagnostics["startup_sequence_completion_reason"]
         == "deadtime_not_identified_after_retries"
     )
     assert algo.on_percent == pytest.approx(0.0)
@@ -443,21 +434,21 @@ async def test_handler_refreshes_diagnostics_after_forced_control_pass() -> None
         cycle_min=4,
         prop_algorithm=SimpleNamespace(
             calculate=MagicMock(),
-            get_diagnostics=MagicMock(return_value={"startup_bootstrap_stage": "completed"}),
+            get_diagnostics=MagicMock(return_value={"startup_sequence_stage": "completed"}),
         ),
         cycle_scheduler=SimpleNamespace(start_cycle=AsyncMock()),
         on_percent=0.0,
     )
     handler = object.__new__(AdaptiveTPIHandler)
     handler._thermostat = thermostat
-    handler._published_diagnostics = {"startup_bootstrap_stage": "cooldown_below_target"}
+    handler._published_diagnostics = {"startup_sequence_stage": "cooling_below_target"}
     handler._should_publish_intermediate = False
 
     await handler.control_heating(force=True)
 
     thermostat.prop_algorithm.calculate.assert_called_once()
     thermostat.cycle_scheduler.start_cycle.assert_awaited_once_with("heat", 0.0, True)
-    assert handler._published_diagnostics == {"startup_bootstrap_stage": "completed"}
+    assert handler._published_diagnostics == {"startup_sequence_stage": "completed"}
 
 
 def test_diagnostics_expose_normalized_units_when_cycle_duration_is_known() -> None:
@@ -470,13 +461,12 @@ def test_diagnostics_expose_normalized_units_when_cycle_duration_is_known() -> N
 
     diagnostics = algo.get_diagnostics()
 
-    assert diagnostics["nd_hat"] == pytest.approx(2.0)
-    assert diagnostics["nd_hat_cycles"] == pytest.approx(2.0)
-    assert diagnostics["deadtime_min"] == pytest.approx(10.0)
-    assert diagnostics["a_hat_per_hour"] == pytest.approx(2.4)
-    assert diagnostics["b_hat_per_hour"] == pytest.approx(0.36)
-    assert diagnostics["tau_h"] == pytest.approx(1.0 / 0.36)
-    assert diagnostics["tau_min"] == pytest.approx((1.0 / 0.36) * 60.0)
+    assert diagnostics["deadtime_cycles"] == pytest.approx(2.0)
+    assert diagnostics["deadtime_minutes"] == pytest.approx(10.0)
+    assert diagnostics["heating_rate_per_hour"] == pytest.approx(2.4)
+    assert diagnostics["cooling_rate_per_hour"] == pytest.approx(0.36)
+    assert diagnostics["thermal_time_constant_hours"] == pytest.approx(1.0 / 0.36)
+    assert diagnostics["thermal_time_constant_minutes"] == pytest.approx((1.0 / 0.36) * 60.0)
 
 
 def test_invalid_temperature_data_rejects_cycle_and_disables_output() -> None:
@@ -493,7 +483,7 @@ def test_invalid_temperature_data_rejects_cycle_and_disables_output() -> None:
 
     diagnostics = algo.get_diagnostics()
     assert algo.on_percent is None
-    assert diagnostics["last_freeze_reason"] == "missing_temperature"
+    assert diagnostics["last_runtime_blocker"] == "missing_temperature"
     assert diagnostics["debug"]["last_cycle_classification"] == "rejected"
 
 
@@ -511,7 +501,7 @@ def test_off_mode_forces_zero_output() -> None:
 
     diagnostics = algo.get_diagnostics()
     assert algo.on_percent == pytest.approx(0.0)
-    assert diagnostics["last_freeze_reason"] == "hvac_mode_incompatible"
+    assert diagnostics["last_runtime_blocker"] == "hvac_mode_incompatible"
     assert diagnostics["debug"]["last_cycle_classification"] == "rejected"
 
 
@@ -1596,9 +1586,9 @@ def test_non_informative_cycle_skips_estimator_update() -> None:
         )
 
     diagnostics = algo.get_diagnostics()
-    assert diagnostics["last_freeze_reason"] == "non_informative_cycle"
+    assert diagnostics["last_runtime_blocker"] == "non_informative_cycle"
     assert diagnostics["debug"]["last_cycle_classification"] == "non_informative"
-    assert diagnostics["accepted_cycles_count"] == 2
+    assert diagnostics["debug"]["accepted_cycles_count"] == 2
 
 
 def test_completed_on_cycle_routes_to_a_not_b(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1668,10 +1658,10 @@ def test_completed_on_cycle_routes_to_a_not_b(monkeypatch: pytest.MonkeyPatch) -
     )
 
     diagnostics = algo.get_diagnostics()
-    assert diagnostics["current_cycle_regime"] == "on"
-    assert diagnostics["learning_route_selected"] == "a"
-    assert diagnostics["last_learning_attempt_regime"] == "a"
-    assert diagnostics["a_samples_count"] >= 1
+    assert diagnostics["debug"]["current_cycle_regime"] == "on"
+    assert diagnostics["debug"]["learning_route_selected"] == "a"
+    assert diagnostics["last_learning_family"] == "heating"
+    assert diagnostics["heating_samples"] >= 1
 
 
 def test_deadtime_history_keeps_committed_cycle_power(
@@ -1780,11 +1770,11 @@ def test_bootstrap_cooldown_off_cycle_can_update_b_near_setpoint(
     )
 
     diagnostics = algo.get_diagnostics()
-    assert diagnostics["learning_route_selected"] == "b"
-    assert diagnostics["last_learning_attempt_reason"] == "sample_accepted"
-    assert diagnostics["b_last_reason"] == "sample_accepted"
-    assert diagnostics["b_samples_count"] >= 1
-    assert diagnostics["b_hat"] > 0.0
+    assert diagnostics["debug"]["learning_route_selected"] == "b"
+    assert diagnostics["last_learning_result"] == "sample_accepted"
+    assert diagnostics["debug"]["b_last_reason"] == "sample_accepted"
+    assert diagnostics["cooling_samples"] >= 1
+    assert diagnostics["debug"]["b_hat"] > 0.0
 
 
 def test_disturbed_cycle_freezes_adaptation() -> None:
@@ -1820,9 +1810,9 @@ def test_disturbed_cycle_freezes_adaptation() -> None:
     )
 
     diagnostics = algo.get_diagnostics()
-    assert diagnostics["last_freeze_reason"] == "power_shedding"
+    assert diagnostics["last_runtime_blocker"] == "power_shedding"
     assert diagnostics["debug"]["last_cycle_classification"] == "rejected"
-    assert diagnostics["accepted_cycles_count"] == 0
+    assert diagnostics["debug"]["accepted_cycles_count"] == 0
 
 
 def test_gain_projection_matches_structural_formulas() -> None:
@@ -1879,7 +1869,7 @@ def test_gain_targets_kext_is_ratio() -> None:
 
 def test_algo_exposes_deadtime_b_proxy_and_crosscheck_after_bootstrap_seed() -> None:
     """The runtime should surface the deadtime-side `b` proxy and seed `b_hat` from it."""
-    algo = AdaptiveTPIAlgorithm(name="test-deadtime-b-proxy")
+    algo = AdaptiveTPIAlgorithm(name="test-deadtime-b-proxy", debug_mode=True)
 
     for i in range(3):
         algo._deadtime_model._identifications.append(
@@ -1896,10 +1886,10 @@ def test_algo_exposes_deadtime_b_proxy_and_crosscheck_after_bootstrap_seed() -> 
     algo._refresh_b_crosscheck()
 
     diagnostics = algo.get_diagnostics()
-    assert diagnostics["deadtime_b_proxy"] == pytest.approx(result.best_candidate_b)
-    assert diagnostics["b_hat"] == pytest.approx(result.best_candidate_b)
-    assert diagnostics["b_crosscheck_error"] == pytest.approx(0.0)
-    assert diagnostics["b_methods_consistent"] is True
+    assert diagnostics["debug"]["deadtime_b_proxy"] == pytest.approx(result.best_candidate_b)
+    assert diagnostics["debug"]["b_hat"] == pytest.approx(result.best_candidate_b)
+    assert diagnostics["debug"]["b_crosscheck_error"] == pytest.approx(0.0)
+    assert diagnostics["debug"]["b_methods_consistent"] is True
 
 
 def test_gain_projection_keeps_bootstrap_defaults_while_confidence_is_low() -> None:
@@ -1943,8 +1933,8 @@ def test_calculate_does_not_adapt_gains_on_sensor_refresh() -> None:
         )
 
     diagnostics = algo.get_diagnostics()
-    assert diagnostics["k_int"] == pytest.approx(0.72)
-    assert diagnostics["k_ext"] == pytest.approx(0.04)
+    assert diagnostics["gain_indoor"] == pytest.approx(0.72)
+    assert diagnostics["gain_outdoor"] == pytest.approx(0.04)
 
 
 def test_reset_learning_restores_fresh_bootstrap_defaults() -> None:
@@ -1965,14 +1955,14 @@ def test_reset_learning_restores_fresh_bootstrap_defaults() -> None:
     algo.reset_learning()
 
     diagnostics = algo.get_diagnostics()
-    assert diagnostics["bootstrap_phase"] == "startup"
-    assert diagnostics["k_int"] == pytest.approx(0.6)
-    assert diagnostics["k_ext"] == pytest.approx(0.02)
-    assert diagnostics["nd_hat"] == pytest.approx(0.0)
-    assert diagnostics["c_nd"] == pytest.approx(0.0)
-    assert diagnostics["a_hat"] == pytest.approx(0.001)
-    assert diagnostics["b_hat"] == pytest.approx(0.0)
-    assert diagnostics["accepted_cycles_count"] == 0
+    assert diagnostics["adaptive_phase"] == "startup"
+    assert diagnostics["gain_indoor"] == pytest.approx(0.6)
+    assert diagnostics["gain_outdoor"] == pytest.approx(0.02)
+    assert diagnostics["deadtime_cycles"] == pytest.approx(0.0)
+    assert diagnostics["deadtime_confidence"] == pytest.approx(0.0)
+    assert diagnostics["debug"]["a_hat"] == pytest.approx(0.001)
+    assert diagnostics["debug"]["b_hat"] == pytest.approx(0.0)
+    assert diagnostics["debug"]["accepted_cycles_count"] == 0
     assert diagnostics["debug"]["deadtime_locked"] is False
 
 
@@ -1997,12 +1987,12 @@ def test_cycle_min_change_invalidates_persisted_warm_start() -> None:
     )
 
     diagnostics = algo.get_diagnostics()
-    assert diagnostics["bootstrap_phase"] == PHASE_A
-    assert diagnostics["a_hat"] == pytest.approx(0.2)
-    assert diagnostics["b_hat"] == pytest.approx(0.04)
-    assert diagnostics["last_freeze_reason"] == "cycle_min_changed_revalidation"
+    assert diagnostics["adaptive_phase"] == "deadtime_learning"
+    assert diagnostics["debug"]["a_hat"] == pytest.approx(0.2)
+    assert diagnostics["debug"]["b_hat"] == pytest.approx(0.04)
+    assert diagnostics["last_runtime_blocker"] == "cycle_min_changed_revalidation"
     assert diagnostics["debug"]["deadtime_locked"] is False
-    assert diagnostics["deadtime_identification_qualities"] == {}
+    assert diagnostics["debug"]["deadtime_identification_qualities"] == {}
 
 
 def test_warm_start_restores_deadtime_model_and_candidate_costs() -> None:
@@ -2043,10 +2033,10 @@ def test_warm_start_restores_deadtime_model_and_candidate_costs() -> None:
     )
 
     diagnostics = restored.get_diagnostics()
-    assert diagnostics["nd_hat"] == pytest.approx(result.nd_hat)
-    assert diagnostics["c_nd"] == pytest.approx(result.c_nd)
-    assert diagnostics["deadtime_identification_qualities"] == result.candidate_costs
-    assert diagnostics["deadtime_b_proxy"] == pytest.approx(result.best_candidate_b)
+    assert diagnostics["deadtime_cycles"] == pytest.approx(result.nd_hat)
+    assert diagnostics["deadtime_confidence"] == pytest.approx(result.c_nd)
+    assert diagnostics["debug"]["deadtime_identification_qualities"] == result.candidate_costs
+    assert diagnostics["debug"]["deadtime_b_proxy"] == pytest.approx(result.best_candidate_b)
     assert diagnostics["debug"]["deadtime_best_candidate"] == pytest.approx(
         result.best_candidate
     )
@@ -2094,13 +2084,13 @@ def test_warm_start_restores_estimator_history_and_keeps_adaptive_gains() -> Non
     )
 
     diagnostics = restored.get_diagnostics()
-    assert diagnostics["a_samples_count"] == len(a_samples)
-    assert diagnostics["b_samples_count"] == len(b_samples)
-    assert diagnostics["c_a"] == pytest.approx(algo._state.c_a)
-    assert diagnostics["c_b"] == pytest.approx(algo._state.c_b)
-    assert diagnostics["b_converged"] is True
-    assert diagnostics["k_int"] != pytest.approx(0.6)
-    assert diagnostics["k_ext"] != pytest.approx(0.01)
+    assert diagnostics["heating_samples"] == len(a_samples)
+    assert diagnostics["cooling_samples"] == len(b_samples)
+    assert diagnostics["heating_rate_confidence"] == pytest.approx(algo._state.c_a)
+    assert diagnostics["cooling_rate_confidence"] == pytest.approx(algo._state.c_b)
+    assert diagnostics["cooling_rate_converged"] is True
+    assert diagnostics["gain_indoor"] != pytest.approx(0.6)
+    assert diagnostics["gain_outdoor"] != pytest.approx(0.01)
 
 
 def test_bootstrap_stuck_exposes_explicit_freeze_reason() -> None:
@@ -2136,7 +2126,7 @@ def test_bootstrap_stuck_exposes_explicit_freeze_reason() -> None:
         )
 
     diagnostics = algo.get_diagnostics()
-    assert diagnostics["bootstrap_phase"] == PHASE_A
-    assert diagnostics["accepted_cycles_count"] == 10
-    assert diagnostics["hours_without_excitation"] == pytest.approx(10 * 5.0 / 60.0)
-    assert diagnostics["last_freeze_reason"] == "insufficient_excitation_bootstrap"
+    assert diagnostics["adaptive_phase"] == "deadtime_learning"
+    assert diagnostics["debug"]["accepted_cycles_count"] == 10
+    assert diagnostics["debug"]["hours_without_excitation"] == pytest.approx(10 * 5.0 / 60.0)
+    assert diagnostics["last_runtime_blocker"] == "insufficient_excitation_bootstrap"

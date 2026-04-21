@@ -45,10 +45,10 @@ The normal progression is:
 
 Typical early observations are:
 
-- `a_hat` frozen
-- `b_converged = false`
+- `heating_rate_per_hour` still unset
+- `cooling_rate_converged = false`
 - gains still close to defaults
-- `startup_bootstrap_active = true` during the initial forced sequence
+- `startup_sequence_active = true` during the initial forced sequence
 
 The runtime loop is:
 
@@ -60,7 +60,7 @@ The runtime loop is:
 6. short learning windows are reconstructed from cycle history
 7. `b` may learn from OFF windows
 8. `a` may learn from ON windows, once deadtime and `b` are ready
-9. `k_int` and `k_ext` are projected conservatively
+9. `gain_indoor` and `gain_outdoor` are projected conservatively
 
 ## Startup Bootstrap
 
@@ -79,32 +79,30 @@ The plugin exposes learning diagnostics in the climate `specific_states`.
 
 The most useful fields to inspect first are:
 
-- `startup_bootstrap_active`
-- `startup_bootstrap_stage`
-- `startup_bootstrap_attempt`
-- `startup_bootstrap_completion_reason`
-- `nd_hat`
-- `c_nd`
-- `b_hat`
-- `c_b`
-- `b_samples_count`
-- `a_hat`
-- `c_a`
-- `a_samples_count`
-- `last_learning_attempt_reason`
-- `a_last_reason`
-- `b_last_reason`
-- `cycle_started_calls_count`
-- `cycle_completed_calls_count`
-- `accepted_cycles_count`
+- `adaptive_phase`
+- `startup_sequence_active`
+- `startup_sequence_stage`
+- `startup_sequence_attempt`
+- `startup_sequence_completion_reason`
+- `deadtime_cycles`
+- `deadtime_confidence`
+- `cooling_rate_per_hour`
+- `cooling_rate_confidence`
+- `cooling_samples`
+- `heating_rate_per_hour`
+- `heating_rate_confidence`
+- `heating_samples`
+- `last_learning_result`
+- `last_learning_family`
+- `last_runtime_blocker`
 
 Healthy learning often looks like this:
 
-- `nd_hat` starts moving before it is considered reliable
-- `b_hat` appears before `a_hat`
-- `b_samples_count` increases slowly
-- `a_last_reason` often stays at `deadtime_not_locked` for a while
-- `k_int` and `k_ext` stay near defaults until confidence is good enough
+- `deadtime_cycles` starts moving before it is considered reliable
+- `cooling_rate_per_hour` appears before `heating_rate_per_hour`
+- `cooling_samples` increases slowly
+- `last_runtime_blocker` often stays related to deadtime or cooling convergence for a while
+- `gain_indoor` and `gain_outdoor` stay near defaults until confidence is good enough
 
 ## Main Documentation
 

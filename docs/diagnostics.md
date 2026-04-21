@@ -2,317 +2,269 @@
 
 ## Purpose
 
-This document explains the main diagnostics exposed by `adaptive_tpi` in the climate `specific_states`.
+This document explains the diagnostics exposed by `adaptive_tpi` in the climate
+`specific_states`.
 
-These diagnostics are mainly intended for:
+The diagnostics are split into two layers:
 
-- development
-- field validation
-- learning/debug sessions
+- a compact non-debug view intended for normal monitoring
+- a larger debug view intended for tuning and internal analysis
 
-## Reading The Runtime State
+## Non-Debug Diagnostics
 
-### Regulation vs learning
+These keys are the primary user-facing diagnostics.
 
-Two different things happen at runtime:
+### Learning phase
 
-1. the thermostat regulates temperature
-2. the adaptive model tries to learn from completed cycles
+- `adaptive_phase`
 
-So it is possible to have:
+Possible values:
 
-- correct regulation
-- but little or no learning progress
+- `startup`
+- `deadtime_learning`
+- `cooling_learning`
+- `heating_learning`
+- `stabilized`
 
-This is why diagnostics should be read in groups.
+### Gains
 
-## Core Fields
+- `gain_indoor`
+- `gain_outdoor`
 
-### Phase
+These are the projected gains currently used by the controller.
 
-- `bootstrap_phase`
-- `phase`
+### Deadtime
 
-Current bootstrap phases are used to indicate where the runtime is in the learning progression.
+- `deadtime_cycles`
+- `deadtime_minutes`
+- `deadtime_confidence`
 
-Typical interpretation:
+Interpretation:
 
-- early phases: deadtime and `b` are still being built
-- later phases: `a` and gain projection can contribute more
+- `deadtime_cycles` is the current deadtime estimate in scheduler cycles
+- `deadtime_minutes` is the same value normalized with the last accepted cycle duration
+- `deadtime_confidence` is the confidence in that estimate, in `[0, 1]`
 
-### Startup bootstrap
+### Heating and cooling rates
 
-- `startup_bootstrap_active`
-- `startup_bootstrap_stage`
-- `startup_bootstrap_attempt`
-- `startup_bootstrap_max_attempts`
-- `startup_bootstrap_target_temp`
-- `startup_bootstrap_lower_target_temp`
-- `startup_bootstrap_command_on_percent`
-- `startup_bootstrap_completion_reason`
+- `heating_rate_per_hour`
+- `cooling_rate_per_hour`
+- `thermal_time_constant_hours`
+- `thermal_time_constant_minutes`
+- `heating_rate_confidence`
+- `cooling_rate_confidence`
+- `cooling_rate_converged`
 
-These fields track the forced startup sequence used before the first deadtime identification.
+Interpretation:
 
-Typical stages are:
+- `heating_rate_per_hour` is the learned heating authority normalized in `°C/hour`
+- `cooling_rate_per_hour` is the learned cooling loss rate normalized in `1/hour`
+- `thermal_time_constant_hours` and `thermal_time_constant_minutes` are derived from the cooling rate
+- `cooling_rate_converged` indicates whether cooling estimation is stable enough to open heating learning
+
+### Sample counters
+
+- `heating_samples`
+- `cooling_samples`
+- `heating_learning_enabled`
+
+Interpretation:
+
+- `heating_samples` counts accepted `a` updates
+- `cooling_samples` counts accepted `b` updates
+- `heating_learning_enabled` indicates whether runtime conditions allow `a` learning when an ON window is valid
+
+### Startup sequence
+
+- `startup_sequence_active`
+- `startup_sequence_stage`
+- `startup_sequence_attempt`
+- `startup_sequence_max_attempts`
+- `startup_sequence_target_temperature`
+- `startup_sequence_cooling_temperature`
+- `startup_sequence_requested_power`
+- `startup_sequence_completion_reason`
+
+Possible `startup_sequence_stage` values:
 
 - `idle`
-- `preheat_to_target`
-- `cooldown_below_target`
-- `reheat_to_target`
+- `heating_to_target`
+- `cooling_below_target`
+- `reheating_to_target`
 - `completed`
 - `abandoned`
 
 Interpretation:
 
-- `startup_bootstrap_active = true` means the scheduler command is currently overridden
-- `startup_bootstrap_attempt` shows whether the runtime is on the first or second OFF->ON attempt
-- `startup_bootstrap_lower_target_temp` is the temporary OFF threshold, equal to `target - 0.3°C`
-- `startup_bootstrap_command_on_percent` is the forced command currently requested by the bootstrap state machine
-- `startup_bootstrap_completion_reason` explains how the sequence ended
+- `startup_sequence_active = true` means startup bootstrap is currently overriding the nominal command
+- `startup_sequence_cooling_temperature` is the temporary cooldown threshold, equal to `target - 0.3°C`
+- `startup_sequence_requested_power` is the power currently requested by the startup sequence
 
-### Gains
+### Last result and blocker
 
-- `k_int`
-- `k_ext`
-
-These are the currently projected controller gains actually used by the plugin.
-
-### Deadtime
-
-- `nd_hat`
-  Estimated deadtime in number of cycles
-- `nd_hat_cycles`
-  Explicit alias of `nd_hat`, also in number of cycles
-- `deadtime_min`
-  Deadtime converted into minutes using the last accepted cycle duration
-- `c_nd`
-  Confidence in the deadtime estimate, in `[0, 1]`
-- `deadtime_candidate_costs`
-  Fit score for each deadtime candidate
-- `deadtime_b_proxy`
-  `b` proxy derived from the best deadtime candidate fit
-
-Important:
-
-- `nd_hat` is expressed in cycles, not minutes
-- `deadtime_min` is the user-facing normalized deadtime in minutes
-- deadtime in minutes is computed as `nd_hat * cycle_min_at_last_accepted_cycle`
-
-### Estimator state
-
-- `a_hat`
-- `a_hat_per_hour`
-- `b_hat`
-- `b_hat_per_hour`
-- `tau_h`
-- `tau_min`
-- `c_a`
-- `c_b`
-- `b_converged`
+- `last_learning_result`
+- `last_learning_family`
+- `last_runtime_blocker`
 
 Interpretation:
 
-- `a_hat`: learned heating authority in `°C/cycle`
-- `a_hat_per_hour`: same quantity normalized to `°C/hour`
-- `b_hat`: learned thermal loss coefficient in `1/cycle`
-- `b_hat_per_hour`: same quantity normalized to `1/hour`
-- `tau_h`: thermal time constant derived from `b_hat_per_hour`, in hours
-- `tau_min`: same thermal time constant in minutes
-- `c_a`, `c_b`: confidence in these estimates
-- `b_converged`: whether `b` is stable enough to open learning for `a`
+- `last_learning_result` is the latest learning outcome or rejection reason
+- `last_learning_family` identifies which branch was considered last:
+  - `heating`
+  - `cooling`
+- `last_runtime_blocker` is the latest runtime freeze reason from the supervisor
 
-### Routing state
+## Debug Diagnostics
 
-- `current_cycle_regime`
-- `learning_route_selected`
-- `learning_route_block_reason`
-- `a_learning_enabled`
-- `deadtime_learning_blackout_active`
+When debug mode is enabled, the diagnostics include a `debug` mapping with the
+technical internal fields.
 
-Interpretation:
+This mapping keeps the implementation-oriented names used by the algorithm.
 
-- `current_cycle_regime` describes how the completed cycle was classified:
-  - `off`
-  - `on`
-  - `mixed`
-- `learning_route_selected` is the branch chosen for that completed cycle:
-  - `a`
-  - `b`
-  - `none`
-- `learning_route_block_reason` explains why the chosen route did not lead to an accepted update
-- `a_learning_enabled` means the runtime conditions are good enough to let `a` learn when an ON window is valid
-- `deadtime_learning_blackout_active = true` means the window is still inside the post-transition deadtime blackout, so explicit `a`/`b` learning is held back
+### Main technical groups
 
-### Informative flags
+- supervisor and phase:
+  - `bootstrap_phase`
+  - `phase`
+  - `last_freeze_reason`
+- gains and estimators:
+  - `k_int`
+  - `k_ext`
+  - `a_hat`
+  - `b_hat`
+  - `a_hat_per_hour`
+  - `b_hat_per_hour`
+  - `tau_h`
+  - `tau_min`
+  - `c_a`
+  - `c_b`
+  - `b_converged`
+  - `i_a`
+  - `i_b`
+  - `a_dispersion`
+  - `b_dispersion`
+- deadtime:
+  - `nd_hat`
+  - `nd_hat_cycles`
+  - `deadtime_min`
+  - `c_nd`
+  - `deadtime_identification_count`
+  - `deadtime_identification_qualities`
+  - `deadtime_b_proxy`
+  - `deadtime_locked`
+  - `deadtime_pending_step`
+  - `deadtime_best_candidate`
+  - `deadtime_second_best_candidate`
+- startup bootstrap:
+  - `startup_bootstrap_active`
+  - `startup_bootstrap_stage`
+  - `startup_bootstrap_attempt`
+  - `startup_bootstrap_max_attempts`
+  - `startup_bootstrap_target_temp`
+  - `startup_bootstrap_lower_target_temp`
+  - `startup_bootstrap_command_on_percent`
+  - `startup_bootstrap_completion_reason`
+- routing:
+  - `current_cycle_regime`
+  - `learning_route_selected`
+  - `learning_route_block_reason`
+  - `deadtime_learning_blackout_active`
+  - `a_learning_enabled`
+  - `a_last_reason`
+  - `b_last_reason`
+  - `last_learning_attempt_reason`
+  - `last_learning_attempt_regime`
+- cycle flow:
+  - `accepted_cycles_count`
+  - `cycle_started_calls_count`
+  - `cycle_completed_calls_count`
+  - `cycle_min_at_last_accepted_cycle`
+  - `hours_without_excitation`
+  - `last_cycle_started_at`
+  - `last_cycle_completed_at`
+  - `last_cycle_classification`
+  - `valid_cycles_count`
+  - `informative_deadtime_cycles_count`
+  - `adaptive_cycles_since_phase_c`
+  - `calculated_on_percent`
+  - `on_percent`
+- cross-check:
+  - `b_crosscheck_error`
+  - `b_methods_consistent`
 
-- `i_a`
-- `i_b`
+## Practical Reading Order
 
-These are not values of `a` or `b`.
+For normal monitoring, read the diagnostics in this order:
 
-They indicate whether the latest update path was informative enough to attempt learning on that branch.
+1. `adaptive_phase`
+2. `startup_sequence_active`
+3. `startup_sequence_stage`
+4. `deadtime_cycles`
+5. `deadtime_confidence`
+6. `cooling_rate_per_hour`
+7. `cooling_rate_converged`
+8. `heating_rate_per_hour`
+9. `last_learning_result`
+10. `last_runtime_blocker`
 
-In practice:
+## Common Situations
 
-- `i_b = 1` means a `b` update was accepted on that cycle
-- `i_a = 1` means an `a` update was accepted on that cycle
-
-### Counters
-
-- `a_samples_count`
-- `b_samples_count`
-- `accepted_cycles_count`
-- `cycle_started_calls_count`
-- `cycle_completed_calls_count`
-
-These are essential to know whether the problem is:
-
-- before cycle completion
-- before cycle acceptance
-- or inside the estimator itself
-
-## Last Reason Fields
-
-### Learning attempt
-
-- `last_learning_attempt_reason`
-- `last_learning_attempt_regime`
-
-These describe the latest learning path considered by the algorithm.
-
-Examples:
-
-- `cycle_interrupted`
-- `deadtime_not_locked`
-- `off_window_no_candidate`
-- `off_window_waiting_more_signal`
-- `on_window_deadtime_blackout`
-- `mixed_cycle_regime`
-
-### Branch-specific reasons
-
-- `a_last_reason`
-- `b_last_reason`
-
-These are usually the best place to look when one branch does not progress.
-
-Examples for `b`:
-
-- `off_window_no_candidate`
-- `off_window_setpoint_changed`
-- `off_window_waiting_more_signal`
-- `off_window_deadtime_blackout`
-- `b_delta_out_too_small`
-- `b_setpoint_error_too_small`
-- `b_window_not_quasi_off`
-
-## Cross-check Between Two `b` Estimates
-
-The runtime currently has two ways to get information about `b`:
-
-1. explicit OFF-window estimator
-2. deadtime-side proxy from the best deadtime candidate fit
-
-Related diagnostics:
-
-- `deadtime_b_proxy`
-- `b_crosscheck_error`
-- `b_methods_consistent`
-
-Interpretation:
-
-- low `b_crosscheck_error` is good
-- `b_methods_consistent = true` means both methods tell a similar story
-- large disagreement suggests caution even if one method alone looks stable
-
-## Practical Debug Patterns
-
-### Case 1: cycles do not progress
+### Startup is still running
 
 Look at:
 
-- `cycle_started_calls_count`
-- `cycle_completed_calls_count`
+- `startup_sequence_active`
+- `startup_sequence_stage`
+- `startup_sequence_attempt`
+- `startup_sequence_completion_reason`
+- `deadtime_cycles`
 
-If starts increase but completes do not, the issue is before the learning logic.
-
-### Case 2: cycles complete but learning does not
-
-Look at:
-
-- `accepted_cycles_count`
-- `last_learning_attempt_reason`
-- `a_last_reason`
-- `b_last_reason`
-
-This usually means the learning guards or the window builder are rejecting the cycle.
-
-### Case 2b: deadtime still does not appear at startup
+### Cooling does not progress
 
 Look at:
 
-- `startup_bootstrap_active`
-- `startup_bootstrap_stage`
-- `startup_bootstrap_attempt`
-- `startup_bootstrap_completion_reason`
-- `deadtime_identification_count`
+- `cooling_samples`
+- `cooling_rate_per_hour`
+- `cooling_rate_confidence`
+- `last_learning_result`
 
-If the bootstrap reaches `abandoned` after attempt `2` and `deadtime_identification_count`
-is still `0`, the plugin has already exhausted the dedicated startup sequence and has
-returned to normal regulation.
+If needed, enable debug mode and inspect:
 
-### Case 3: `b` does not move in OFF phase
+- `debug["b_last_reason"]`
+- `debug["learning_route_selected"]`
+- `debug["learning_route_block_reason"]`
 
-Look at:
-
-- `b_last_reason`
-- `b_samples_count`
-- `deadtime_b_proxy`
-- `b_crosscheck_error`
-
-Common explanations:
-
-- no valid OFF candidate yet
-- a contradictory setpoint jump invalidated the window
-- the cycle is still inside the deadtime blackout after a recent regime transition
-- not enough signal
-- setpoint error too small
-
-### Case 4: `a` does not start
+### Heating does not start learning
 
 Look at:
 
-- `deadtime_locked`
-- `c_nd`
-- `b_converged`
-- `a_learning_enabled`
-- `a_last_reason`
+- `heating_learning_enabled`
+- `cooling_rate_converged`
+- `deadtime_confidence`
+- `heating_samples`
+- `last_runtime_blocker`
 
-This is often normal during bootstrap.
+If needed, enable debug mode and inspect:
 
-### Case 5: learning is blocked even though cycles complete
+- `debug["a_last_reason"]`
+
+### Regulation still looks frozen
 
 Look at:
 
-- `current_cycle_regime`
-- `learning_route_selected`
-- `learning_route_block_reason`
-- `deadtime_learning_blackout_active`
+- `last_runtime_blocker`
+- `gain_indoor`
+- `gain_outdoor`
 
-Common explanations:
+If needed, enable debug mode and inspect:
 
-- the completed cycle is `mixed`, so no explicit `a`/`b` route is opened
-- the route is correct, but the window is still inside the deadtime blackout
-- the setpoint moved against the current regime and invalidated the window
+- `debug["last_cycle_classification"]`
+- `debug["calculated_on_percent"]`
+- `debug["on_percent"]`
 
 ## Persistence Note
 
-The routing diagnostics are runtime-only by design:
+The compact user-facing diagnostics describe the current adaptive state.
 
-- `current_cycle_regime`
-- `learning_route_selected`
-- `learning_route_block_reason`
-- `deadtime_learning_blackout_active`
-
-They describe the latest decision path and are not intended to survive a restart.
-Persistent fields remain focused on adaptive state continuity rather than the last branch-selection event.
+The debug routing fields remain runtime-oriented and are not intended to be a
+stable persistence contract for dashboards across restarts.

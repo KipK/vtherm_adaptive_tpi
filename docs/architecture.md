@@ -230,39 +230,39 @@ The climate diagnostics are intended to answer three practical questions:
 Useful diagnostic groups:
 
 - cycle flow:
-  - `cycle_started_calls_count`
-  - `cycle_completed_calls_count`
-  - `last_cycle_started_at`
-  - `last_cycle_completed_at`
+  - `debug["cycle_started_calls_count"]`
+  - `debug["cycle_completed_calls_count"]`
+  - `debug["last_cycle_started_at"]`
+  - `debug["last_cycle_completed_at"]`
 - deadtime:
-  - `nd_hat`
-  - `c_nd`
-  - `deadtime_candidate_costs`
-  - `deadtime_b_proxy`
+  - `deadtime_cycles`
+  - `deadtime_confidence`
+  - `debug["deadtime_identification_qualities"]`
+  - `debug["deadtime_b_proxy"]`
 - startup bootstrap:
-  - `startup_bootstrap_active`
-  - `startup_bootstrap_stage`
-  - `startup_bootstrap_attempt`
-  - `startup_bootstrap_completion_reason`
+  - `startup_sequence_active`
+  - `startup_sequence_stage`
+  - `startup_sequence_attempt`
+  - `startup_sequence_completion_reason`
 - estimator:
-  - `a_hat`
-  - `b_hat`
-  - `c_a`
-  - `c_b`
-  - `a_samples_count`
-  - `b_samples_count`
-  - `a_last_reason`
-  - `b_last_reason`
+  - `heating_rate_per_hour`
+  - `cooling_rate_per_hour`
+  - `heating_rate_confidence`
+  - `cooling_rate_confidence`
+  - `heating_samples`
+  - `cooling_samples`
+  - `debug["a_last_reason"]`
+  - `debug["b_last_reason"]`
 - routing:
-  - `current_cycle_regime`
-  - `learning_route_selected`
-  - `learning_route_block_reason`
-  - `a_learning_enabled`
-  - `deadtime_learning_blackout_active`
+  - `heating_learning_enabled`
+  - `debug["current_cycle_regime"]`
+  - `debug["learning_route_selected"]`
+  - `debug["learning_route_block_reason"]`
+  - `debug["deadtime_learning_blackout_active"]`
 - cross-check:
-  - `deadtime_b_proxy`
-  - `b_crosscheck_error`
-  - `b_methods_consistent`
+  - `debug["deadtime_b_proxy"]`
+  - `debug["b_crosscheck_error"]`
+  - `debug["b_methods_consistent"]`
 
 ## Bootstrap Phases
 
@@ -393,7 +393,7 @@ When persistent state is loaded after a gap:
 - confidence decay after > 30 days drops `c_nd` below 0.6
 - full confidence reset (gap > 90 days, or `cycle_min` change)
 
-The `last_freeze_reason` diagnostic always names the active blocker.
+The compact `last_runtime_blocker` diagnostic always names the active blocker.
 
 ## Known Limits
 
