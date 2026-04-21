@@ -53,6 +53,7 @@ Interpretation:
 - `thermal_time_constant_hours`
 - `heating_rate_confidence`
 - `cooling_rate_confidence`
+- `heating_rate_converged`
 - `cooling_rate_converged`
 
 Interpretation:
@@ -60,6 +61,7 @@ Interpretation:
 - `heating_rate_per_hour` is the learned heating authority normalized in `°C/hour`
 - `cooling_rate_per_hour` is the learned cooling loss rate normalized in `1/hour`
 - `thermal_time_constant_hours` is derived from the cooling rate
+- `heating_rate_converged` indicates whether the heating estimate has reached the confidence target used by Phase C stabilization checks
 - `cooling_rate_converged` indicates whether cooling estimation is stable enough to open heating learning
 
 ### Sample counters
@@ -205,8 +207,9 @@ For normal monitoring, read the diagnostics in this order:
 6. `cooling_rate_per_hour`
 7. `cooling_rate_converged`
 8. `heating_rate_per_hour`
-9. `last_learning_result`
-10. `last_runtime_blocker`
+9. `heating_rate_converged`
+10. `last_learning_result`
+11. `last_runtime_blocker`
 
 ## Common Situations
 
@@ -241,6 +244,7 @@ Look at:
 
 - `heating_learning_enabled`
 - `cooling_rate_converged`
+- `heating_rate_converged`
 - `deadtime_confidence`
 - `heating_samples`
 - `last_runtime_blocker`

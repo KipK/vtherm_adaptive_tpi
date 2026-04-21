@@ -50,6 +50,7 @@ La progression normale est :
 Les observations initiales typiques sont :
 
 - `heating_rate_per_hour` toujours non défini
+- `heating_rate_converged = false`
 - `cooling_rate_converged = false`
 - les gains toujours proches des valeurs par défaut
 - `startup_sequence_active = true` pendant la séquence forcée initiale
@@ -98,6 +99,7 @@ Les champs les plus utiles à inspecter en premier sont :
 - `sample_window_size`
 - `heating_rate_per_hour`
 - `heating_rate_confidence`
+- `heating_rate_converged`
 - `heating_samples`
 - `last_learning_result`
 - `last_learning_family`

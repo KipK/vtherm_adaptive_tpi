@@ -245,6 +245,7 @@ Groupes de diagnostic utiles :
   - `cooling_rate_per_hour`
   - `heating_rate_confidence`
   - `cooling_rate_confidence`
+  - `heating_rate_converged`
   - `heating_samples`
   - `cooling_samples`
   - `debug["a_last_reason"]`

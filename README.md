@@ -56,6 +56,7 @@ The normal progression is:
 Typical early observations are:
 
 - `heating_rate_per_hour` still unset
+- `heating_rate_converged = false`
 - `cooling_rate_converged = false`
 - gains still close to defaults
 - `startup_sequence_active = true` during the initial forced sequence
@@ -104,6 +105,7 @@ The most useful fields to inspect first are:
 - `sample_window_size`
 - `heating_rate_per_hour`
 - `heating_rate_confidence`
+- `heating_rate_converged`
 - `heating_samples`
 - `last_learning_result`
 - `last_learning_family`

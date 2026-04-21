@@ -106,6 +106,7 @@ def test_startup_with_no_history_keeps_bootstrap_defaults() -> None:
     assert diagnostics["heating_rate_per_hour"] is None
     assert diagnostics["cooling_rate_per_hour"] is None
     assert diagnostics["thermal_time_constant_hours"] is None
+    assert diagnostics["heating_rate_converged"] is False
 
 
 def test_startup_bootstrap_cools_down_immediately_when_temperature_is_at_setpoint() -> None:
@@ -2156,7 +2157,9 @@ def test_warm_start_restores_estimator_history_and_keeps_adaptive_gains() -> Non
     assert diagnostics["debug"]["sample_window_size"] == 12
     assert diagnostics["heating_rate_confidence"] == pytest.approx(algo._state.c_a)
     assert diagnostics["cooling_rate_confidence"] == pytest.approx(algo._state.c_b)
+    assert diagnostics["heating_rate_converged"] is True
     assert diagnostics["cooling_rate_converged"] is True
+    assert diagnostics["debug"]["heating_rate_converged"] is True
     assert diagnostics["gain_indoor"] != pytest.approx(0.6)
     assert diagnostics["gain_outdoor"] != pytest.approx(0.01)
 

@@ -52,6 +52,7 @@ Interprétation :
 - `thermal_time_constant_hours`
 - `heating_rate_confidence`
 - `cooling_rate_confidence`
+- `heating_rate_converged`
 - `cooling_rate_converged`
 
 Interprétation :
@@ -59,6 +60,7 @@ Interprétation :
 - `heating_rate_per_hour` est l'autorité de chauffage apprise normalisée en `°C/heure`
 - `cooling_rate_per_hour` est le taux de perte de refroidissement appris normalisé en `1/heure`
 - `thermal_time_constant_hours` est dérivé du taux de refroidissement
+- `heating_rate_converged` indique si l'estimation du chauffage a atteint le niveau de confiance utilisé par les vérifications de stabilisation de la phase C
 - `cooling_rate_converged` indique si l'estimation du refroidissement est stable enough pour ouvrir l'apprentissage du chauffage
 
 ### Compteurs d'échantillons
@@ -203,8 +205,9 @@ Pour la surveillance normale, lisez les diagnostiques dans cet ordre :
 6. `cooling_rate_per_hour`
 7. `cooling_rate_converged`
 8. `heating_rate_per_hour`
-9. `last_learning_result`
-10. `last_runtime_blocker`
+9. `heating_rate_converged`
+10. `last_learning_result`
+11. `last_runtime_blocker`
 
 ## Situations courantes
 
@@ -239,6 +242,7 @@ Regardez :
 
 - `heating_learning_enabled`
 - `cooling_rate_converged`
+- `heating_rate_converged`
 - `deadtime_confidence`
 - `heating_samples`
 - `last_runtime_blocker`

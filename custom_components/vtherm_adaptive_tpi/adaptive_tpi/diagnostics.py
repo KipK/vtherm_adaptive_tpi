@@ -56,6 +56,11 @@ def _tau_h(b_per_hour: float | None) -> float | None:
     return 1.0 / b_per_hour
 
 
+def _heating_rate_converged(state: AdaptiveTPIState) -> bool:
+    """Return True when the heating estimate meets the phase-C confidence target."""
+    return state.c_a >= 0.6
+
+
 def _public_phase_name(phase: str | None) -> str | None:
     """Map one internal supervisor phase to a user-facing label."""
     if phase is None:
@@ -83,6 +88,7 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
     a_per_hour = _per_hour(state.a_hat, cycle_min)
     b_per_hour = _per_hour(state.b_hat, cycle_min)
     tau_h = _tau_h(b_per_hour)
+    heating_converged = _heating_rate_converged(state)
     data = {
         "adaptive_phase": _public_phase_name(state.bootstrap_phase),
         "gain_indoor": state.k_int,
@@ -97,6 +103,7 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
         "thermal_time_constant_hours": tau_h,
         "heating_rate_confidence": state.c_a,
         "cooling_rate_confidence": state.c_b,
+        "heating_rate_converged": heating_converged,
         "cooling_rate_converged": state.b_converged,
         "heating_samples": state.a_samples_count,
         "cooling_samples": state.b_samples_count,
@@ -133,6 +140,7 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
             "tau_min": (tau_h * 60.0) if tau_h is not None else None,
             "c_a": state.c_a,
             "c_b": state.c_b,
+            "heating_rate_converged": heating_converged,
             "b_converged": state.b_converged,
             "i_a": state.i_a,
             "i_b": state.i_b,

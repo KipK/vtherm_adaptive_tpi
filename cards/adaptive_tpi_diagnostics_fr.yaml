@@ -42,6 +42,7 @@ Aucune donnée `specific_states.adaptive_tpi` trouvée pour `{{ entity }}`.
 {% set cooling_samples = diag.get('cooling_samples') %}
 {% set sample_window_size = diag.get('sample_window_size') or 12 %}
 {% set heating_enabled = diag.get('heating_learning_enabled') %}
+{% set heating_converged = diag.get('heating_rate_converged') %}
 {% set cooling_converged = diag.get('cooling_rate_converged') %}
 {% set startup_active = diag.get('startup_sequence_active') %}
 {% set startup_attempt = diag.get('startup_sequence_attempt') %}
@@ -80,6 +81,7 @@ Aucune donnée `specific_states.adaptive_tpi` trouvée pour `{{ entity }}`.
 | État du modèle | Valeur |
 |---|---|
 | ❄️ Modèle refroidissement | **{{ 'Stable' if cooling_converged else 'En apprentissage' }}** |
+| ♨️ Modèle chauffage | **{{ 'Stable' if heating_converged else 'En apprentissage' }}** |
 | ♨️ Apprentissage chauffage | **{{ 'Autorisé' if heating_enabled else 'Pas encore' }}** |
 | ❄️ Échantillons refroidissement | **{{ (cooling_samples if cooling_samples is not none else 0) ~ ' / ' ~ sample_window_size }}** |
 | ♨️ Échantillons chauffage | **{{ (heating_samples if heating_samples is not none else 0) ~ ' / ' ~ sample_window_size }}** |
@@ -120,6 +122,7 @@ Aucune donnée `specific_states.adaptive_tpi` trouvée pour `{{ entity }}`.
 | `b_hat` | {{ debug.get('b_hat') | round(4) if debug.get('b_hat') is not none else 'Indisponible' }} |
 | `c_a` | {{ ((debug.get('c_a') * 100) | round(0) ~ ' %') if debug.get('c_a') is not none else 'Indisponible' }} |
 | `c_b` | {{ ((debug.get('c_b') * 100) | round(0) ~ ' %') if debug.get('c_b') is not none else 'Indisponible' }} |
+| `heating_rate_converged` | {{ 'Oui' if debug.get('heating_rate_converged') else 'Non' }} |
 | `b_converged` | {{ 'Oui' if debug.get('b_converged') else 'Non' }} |
 
 | Temps mort | Valeur |
