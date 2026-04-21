@@ -15,8 +15,8 @@ Le plugin est attaché à Versatile Thermostat via `vtherm_api` et réagit à de
 
 À un haut niveau :
 
-1. `calculate()` calcule le `on_percent` actuel
-2. l'ordonnanceur VT engage un cycle réel
+1. `calculate()` calcule le `on_percent` demandé pour le prochain cycle
+2. l'ordonnanceur VT engage un cycle réel avec sa puissance appliquée
 3. le plugin enregistre le contexte de début de cycle
 4. à la fin du cycle, le plugin décide si le cycle est valide pour l'apprentissage
 5. s'il est valide, il met à jour :
@@ -44,7 +44,7 @@ Couche d'orchestration à l'exécution.
 
 Responsabilités :
 
-- calculer `on_percent`
+- calculer le `on_percent` demandé
 - capturer les données de cycle engagées
 - valider les conditions d'apprentissage
 - acheminer les cycles vers le temps mort, `b`, ou `a`
@@ -122,7 +122,7 @@ Responsabilités :
 
 - dériver les objectifs de gain structurel à partir de `a_hat`, `b_hat` et `nd_hat`
 - projeter les gains lentement avec les limites de taux bornées
-- calculer le `on_percent` nominal
+- calculer le `on_percent` nominal demandé
 
 ### `adaptive_tpi/startup_bootstrap.py`
 
@@ -163,7 +163,7 @@ Avant l'existence du temps mort, l'exécution peut temporairement contourner la 
 
 À la fin du cycle :
 
-- la puissance réalisée est enregistrée
+- le contexte de cycle engagé capturé au démarrage est conservé pour l'apprentissage
 - les cycles interrompus sont rejetés de l'apprentissage
 - les cycles acceptés sont ajoutés à l'historique du modèle de temps mort
 

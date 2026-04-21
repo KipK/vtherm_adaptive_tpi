@@ -15,8 +15,8 @@ The plugin is attached to Versatile Thermostat through `vtherm_api` and reacts t
 
 At a high level:
 
-1. `calculate()` computes the current `on_percent`
-2. the VT cycle scheduler commits a real cycle
+1. `calculate()` computes the requested `on_percent` for the next cycle
+2. the VT cycle scheduler commits a real cycle and its applied power
 3. the plugin records the cycle start context
 4. at cycle end, the plugin decides whether the cycle is valid for learning
 5. if valid, it updates:
@@ -44,7 +44,7 @@ Runtime orchestration layer.
 
 Responsibilities:
 
-- compute `on_percent`
+- compute the requested `on_percent`
 - capture committed cycle data
 - validate learning conditions
 - route cycles toward deadtime, `b`, or `a`
@@ -125,7 +125,7 @@ Responsibilities:
 
 - derive structural gain targets from `a_hat`, `b_hat`, and `nd_hat`
 - project gains slowly with bounded rate limits
-- compute the nominal `on_percent`
+- compute the nominal requested `on_percent`
 
 ### `adaptive_tpi/startup_bootstrap.py`
 
@@ -167,7 +167,7 @@ command and use the startup bootstrap sequence instead:
 
 At the end of the cycle:
 
-- realized power is recorded
+- the committed cycle context captured at cycle start is kept for learning
 - interrupted cycles are rejected from learning
 - accepted cycles are added to the deadtime model history
 

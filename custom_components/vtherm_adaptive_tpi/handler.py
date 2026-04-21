@@ -151,21 +151,21 @@ class AdaptiveTPIHandler:
             )
             return
 
-        on_percent = t.on_percent
-        if on_percent is None:
+        requested_on_percent = t.prop_algorithm.requested_on_percent
+        if requested_on_percent is None:
             if hasattr(t.prop_algorithm, "reject_cycle"):
                 t.prop_algorithm.reject_cycle("missing_temperature")
             if force:
                 self._refresh_published_diagnostics()
             _LOGGER.info(
-                "%s - on_percent is None (temperature unavailable). Skipping cycle.",
+                "%s - requested_on_percent is None (temperature unavailable). Skipping cycle.",
                 t,
             )
             return
 
         await t.cycle_scheduler.start_cycle(
             t.vtherm_hvac_mode,
-            on_percent,
+            requested_on_percent,
             force,
         )
         if force:

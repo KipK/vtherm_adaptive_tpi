@@ -122,6 +122,7 @@ def test_startup_bootstrap_cools_down_immediately_when_temperature_is_at_setpoin
     )
 
     diagnostics = algo.get_diagnostics()
+    assert algo.requested_on_percent == pytest.approx(0.0)
     assert algo.on_percent == pytest.approx(0.0)
     assert diagnostics["startup_sequence_active"] is True
     assert diagnostics["startup_sequence_stage"] == "cooling_below_target"
@@ -142,7 +143,8 @@ def test_startup_bootstrap_retries_a_second_deadtime_cycle_when_first_one_fails(
         hvac_mode="heat",
     )
     diagnostics = algo.get_diagnostics()
-    assert algo.on_percent == pytest.approx(1.0)
+    assert algo.requested_on_percent == pytest.approx(1.0)
+    assert algo.on_percent == pytest.approx(0.0)
     assert diagnostics["startup_sequence_stage"] == "heating_to_target"
 
     algo.calculate(
@@ -152,6 +154,7 @@ def test_startup_bootstrap_retries_a_second_deadtime_cycle_when_first_one_fails(
         slope=None,
         hvac_mode="heat",
     )
+    assert algo.requested_on_percent == pytest.approx(0.0)
     assert algo.on_percent == pytest.approx(0.0)
 
     algo.calculate(
@@ -162,7 +165,8 @@ def test_startup_bootstrap_retries_a_second_deadtime_cycle_when_first_one_fails(
         hvac_mode="heat",
     )
     diagnostics = algo.get_diagnostics()
-    assert algo.on_percent == pytest.approx(1.0)
+    assert algo.requested_on_percent == pytest.approx(1.0)
+    assert algo.on_percent == pytest.approx(0.0)
     assert diagnostics["startup_sequence_stage"] == "reheating_to_target"
 
     algo.calculate(
@@ -174,6 +178,7 @@ def test_startup_bootstrap_retries_a_second_deadtime_cycle_when_first_one_fails(
     )
 
     diagnostics = algo.get_diagnostics()
+    assert algo.requested_on_percent == pytest.approx(0.0)
     assert algo.on_percent == pytest.approx(0.0)
     assert diagnostics["startup_sequence_active"] is True
     assert diagnostics["startup_sequence_stage"] == "cooling_below_target"
@@ -212,6 +217,7 @@ def test_startup_bootstrap_completes_after_first_identified_deadtime_cycle() -> 
     assert diagnostics["startup_sequence_active"] is False
     assert diagnostics["startup_sequence_stage"] == "completed"
     assert diagnostics["startup_sequence_completion_reason"] == "deadtime_identified"
+    assert algo.requested_on_percent == pytest.approx(0.0)
     assert algo.on_percent == pytest.approx(0.0)
 
 
@@ -258,6 +264,7 @@ def test_startup_bootstrap_exits_if_deadtime_arrives_after_reheat_cycle_closed()
     assert diagnostics["startup_sequence_active"] is False
     assert diagnostics["startup_sequence_stage"] == "completed"
     assert diagnostics["startup_sequence_completion_reason"] == "deadtime_identified"
+    assert algo.requested_on_percent == pytest.approx(0.0)
     assert algo.on_percent == pytest.approx(0.0)
 
 
@@ -308,6 +315,7 @@ def test_startup_bootstrap_abandons_after_second_failed_deadtime_cycle() -> None
         diagnostics["startup_sequence_completion_reason"]
         == "deadtime_not_identified_after_retries"
     )
+    assert algo.requested_on_percent == pytest.approx(0.0)
     assert algo.on_percent == pytest.approx(0.0)
 
 
@@ -435,9 +443,9 @@ async def test_handler_refreshes_diagnostics_after_forced_control_pass() -> None
         prop_algorithm=SimpleNamespace(
             calculate=MagicMock(),
             get_diagnostics=MagicMock(return_value={"startup_sequence_stage": "completed"}),
+            requested_on_percent=0.0,
         ),
         cycle_scheduler=SimpleNamespace(start_cycle=AsyncMock()),
-        on_percent=0.0,
     )
     handler = object.__new__(AdaptiveTPIHandler)
     handler._thermostat = thermostat
@@ -496,6 +504,7 @@ def test_invalid_temperature_data_rejects_cycle_and_disables_output() -> None:
 
     diagnostics = algo.get_diagnostics()
     assert algo.on_percent is None
+    assert algo.requested_on_percent is None
     assert diagnostics["last_runtime_blocker"] == "missing_temperature"
     assert diagnostics["debug"]["last_cycle_classification"] == "rejected"
 
@@ -513,6 +522,7 @@ def test_off_mode_forces_zero_output() -> None:
     )
 
     diagnostics = algo.get_diagnostics()
+    assert algo.requested_on_percent == pytest.approx(0.0)
     assert algo.on_percent == pytest.approx(0.0)
     assert diagnostics["last_runtime_blocker"] == "hvac_mode_incompatible"
     assert diagnostics["debug"]["last_cycle_classification"] == "rejected"
@@ -1735,6 +1745,37 @@ def test_deadtime_history_keeps_committed_cycle_power(
     )
 
     assert recorded_powers == [pytest.approx(0.8)]
+    assert algo.on_percent == pytest.approx(0.8)
+
+
+def test_calculate_keeps_committed_power_separate_from_next_requested_power() -> None:
+    """Requested power should not overwrite the currently committed cycle power."""
+    algo = AdaptiveTPIAlgorithm(name="test-requested-vs-committed", debug_mode=True)
+
+    algo.on_cycle_started(
+        on_time_sec=180.0,
+        off_time_sec=120.0,
+        on_percent=0.6,
+        hvac_mode="heat",
+        target_temp=21.0,
+        current_temp=20.0,
+        ext_current_temp=10.0,
+    )
+    algo.calculate(
+        target_temp=22.0,
+        current_temp=20.0,
+        ext_current_temp=10.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+
+    diagnostics = algo.get_diagnostics()
+    assert algo.on_percent == pytest.approx(0.6)
+    assert algo.requested_on_percent == pytest.approx(1.0)
+    assert diagnostics["current_cycle_percent"] == pytest.approx(0.6)
+    assert diagnostics["next_cycle_percent"] == pytest.approx(1.0)
+    assert diagnostics["debug"]["committed_on_percent"] == pytest.approx(0.6)
+    assert diagnostics["debug"]["requested_on_percent"] == pytest.approx(1.0)
 
 
 def test_bootstrap_cooldown_off_cycle_can_update_b_near_setpoint(

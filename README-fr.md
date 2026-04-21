@@ -16,8 +16,8 @@ et d'utiliser ces valeurs apprises pour ajuster les gains du thermostat au fil d
 
 Le plugin reste dans la famille TPI :
 
-- il calcule un `on_percent`
-- Versatile Thermostat applique toujours cette commande via son ordonnanceur de cycle normal
+- il calcule un `on_percent` demandé pour le prochain cycle
+- Versatile Thermostat engage toujours la puissance réellement appliquée au cycle courant via son ordonnanceur de cycle normal
 - l'apprentissage ne se fait que sur les cycles réels complétés
 
 TPI est un algorithme de régulation construit autour d'une boucle proportionnelle via `gain_indoor` plus un terme d'anticipation via `gain_outdoor` pour compenser les pertes thermiques. Il n'y a pas de terme de correction intégrale utilisé pour annuler les erreurs en régime permanent, donc le `I` dans `TPI` peut être trompeur.
@@ -56,8 +56,8 @@ Les observations initiales typiques sont :
 
 La boucle d'exécution est :
 
-1. le contrôleur calcule `on_percent`
-2. l'ordonnanceur VT engage un cycle réel
+1. le contrôleur calcule le `on_percent` demandé pour le prochain cycle
+2. l'ordonnanceur VT engage un cycle réel avec la puissance appliquée à ce cycle
 3. le plugin enregistre le contexte du cycle
 4. à la fin du cycle, le plugin valide le cycle pour l'apprentissage
 5. le modèle de temps mort est mis à jour
@@ -84,6 +84,8 @@ Le plugin expose les diagnostiques d'apprentissage dans les `specific_states` du
 Les champs les plus utiles à inspecter en premier sont :
 
 - `adaptive_phase`
+- `current_cycle_percent`
+- `next_cycle_percent`
 - `startup_sequence_active`
 - `startup_sequence_stage`
 - `startup_sequence_attempt`

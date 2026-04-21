@@ -96,6 +96,8 @@ Interprétation :
 - `startup_sequence_active = true` signifie que le bootstrap de démarrage remplace actuellement la commande nominale
 - `startup_sequence_cooling_temperature` est le seuil de refroidissement temporaire, égal à `target - 0.3°C`
 - `startup_sequence_requested_power` est la puissance actuellement demandée par la séquence de démarrage
+- `current_cycle_percent` est la puissance engagée pour le cycle actuellement en cours
+- `next_cycle_percent` est la puissance demandée préparée pour le prochain cycle de l'ordonnanceur
 
 ### Dernier résultat et bloqueur
 
@@ -184,7 +186,8 @@ Ce mappage conserve les noms orientés implémentation utilisés par l'algorithm
   - `informative_deadtime_cycles_count`
   - `adaptive_cycles_since_phase_c`
   - `calculated_on_percent`
-  - `on_percent`
+  - `requested_on_percent`
+  - `committed_on_percent`
 - vérification croisée :
   - `b_crosscheck_error`
   - `b_methods_consistent`
@@ -257,7 +260,8 @@ Si nécessaire, activez le mode débogage et inspectez :
 
 - `debug["last_cycle_classification"]`
 - `debug["calculated_on_percent"]`
-- `debug["on_percent"]`
+- `debug["requested_on_percent"]`
+- `debug["committed_on_percent"]`
 
 ## Note de persistance
 

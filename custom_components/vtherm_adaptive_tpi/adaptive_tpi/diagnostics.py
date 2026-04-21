@@ -86,6 +86,8 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
         "adaptive_phase": _public_phase_name(state.bootstrap_phase),
         "gain_indoor": state.k_int,
         "gain_outdoor": state.k_ext,
+        "current_cycle_percent": state.committed_on_percent,
+        "next_cycle_percent": state.requested_on_percent,
         "deadtime_cycles": state.nd_hat,
         "deadtime_minutes": _published_deadtime_minutes(state),
         "deadtime_confidence": state.c_nd,
@@ -177,6 +179,7 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
             "deadtime_best_candidate": state.deadtime_best_candidate,
             "deadtime_second_best_candidate": state.deadtime_second_best_candidate,
             "calculated_on_percent": state.calculated_on_percent,
-            "on_percent": state.on_percent,
+            "requested_on_percent": state.requested_on_percent,
+            "committed_on_percent": state.committed_on_percent,
         }
     return data

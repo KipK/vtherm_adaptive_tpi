@@ -18,8 +18,8 @@ and to use these learned values to adjust the thermostat gains over time.
 
 The plugin stays in the TPI family:
 
-- it computes an `on_percent`
-- Versatile Thermostat still applies that command through its normal cycle scheduler
+- it computes a requested `on_percent` for the next cycle
+- Versatile Thermostat still commits the actual current-cycle power through its normal cycle scheduler
 - learning happens only from completed real cycles
 
 TPI is a regulation algorithm built around a proportional loop
@@ -62,8 +62,8 @@ Typical early observations are:
 
 The runtime loop is:
 
-1. the controller computes `on_percent`
-2. the VT scheduler commits a real cycle
+1. the controller computes the next requested `on_percent`
+2. the VT scheduler commits a real cycle and its applied power
 3. the plugin records the cycle context
 4. at cycle end, the plugin validates the cycle for learning
 5. the deadtime model is updated
@@ -90,6 +90,8 @@ The plugin exposes learning diagnostics in the climate `specific_states`.
 The most useful fields to inspect first are:
 
 - `adaptive_phase`
+- `current_cycle_percent`
+- `next_cycle_percent`
 - `startup_sequence_active`
 - `startup_sequence_stage`
 - `startup_sequence_attempt`

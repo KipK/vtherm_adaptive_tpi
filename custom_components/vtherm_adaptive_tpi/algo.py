@@ -93,7 +93,7 @@ class AdaptiveTPIAlgorithm:
         hvac_mode,
         **kwargs,
     ) -> None:
-        """Compute the current on_percent using the placeholder controller."""
+        """Compute the requested heating fraction for the next cycle."""
         del slope
 
         decision = self._supervisor.evaluate_runtime_conditions(
@@ -123,6 +123,7 @@ class AdaptiveTPIAlgorithm:
                 )
             )
             self._state.calculated_on_percent = 0.0
+            self._state.requested_on_percent = 0.0
             self._temperature_available = False
             return
 
@@ -146,11 +147,11 @@ class AdaptiveTPIAlgorithm:
         if bootstrap_snapshot.command_on_percent is not None:
             command_on_percent = bootstrap_snapshot.command_on_percent
         self._state.calculated_on_percent = command_on_percent
-        self._state.on_percent = command_on_percent
+        self._state.requested_on_percent = command_on_percent
 
     def update_realized_power(self, power_percent: float) -> None:
-        """Record the power effectively applied after scheduler constraints."""
-        self._state.on_percent = max(0.0, min(1.0, power_percent))
+        """Record the power committed for the current scheduler cycle."""
+        self._state.committed_on_percent = max(0.0, min(1.0, power_percent))
 
     def on_cycle_started(
         self,
@@ -176,12 +177,12 @@ class AdaptiveTPIAlgorithm:
             target_temp=target_temp,
             current_temp=current_temp,
             outdoor_temp=ext_current_temp,
-            applied_power=self._state.on_percent,
+            applied_power=self._state.committed_on_percent,
             hvac_mode=hvac_mode,
             bootstrap_b_learning_allowed=(
                 self._state.startup_bootstrap_active
                 and self._state.startup_bootstrap_stage == STARTUP_BOOTSTRAP_COOLDOWN
-                and classify_cycle_regime(self._state.on_percent) == WINDOW_REGIME_OFF
+                and classify_cycle_regime(self._state.committed_on_percent) == WINDOW_REGIME_OFF
             ),
         )
 
@@ -203,9 +204,6 @@ class AdaptiveTPIAlgorithm:
         self._state.last_cycle_completed_at = self._utc_now().isoformat()
         pending_cycle = self._pending_cycle_sample
         self._pending_cycle_sample = None
-
-        if e_eff is not None:
-            self.update_realized_power(e_eff)
 
         if pending_cycle is None:
             self._state.last_learning_attempt_reason = "missing_cycle_context"
@@ -591,7 +589,14 @@ class AdaptiveTPIAlgorithm:
         """Return the currently applied heating fraction."""
         if not self._temperature_available:
             return None
-        return self._state.on_percent
+        return self._state.committed_on_percent
+
+    @property
+    def requested_on_percent(self) -> float | None:
+        """Return the requested heating fraction for the next cycle."""
+        if not self._temperature_available:
+            return None
+        return self._state.requested_on_percent
 
     @property
     def calculated_on_percent(self) -> float:

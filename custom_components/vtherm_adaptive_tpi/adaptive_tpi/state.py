@@ -83,7 +83,8 @@ class AdaptiveTPIState:
     last_learning_attempt_regime: str | None = None
     a_dispersion: float = 0.0
     b_dispersion: float = 0.0
-    on_percent: float = 0.0
+    requested_on_percent: float = 0.0
+    committed_on_percent: float = 0.0
     calculated_on_percent: float = 0.0
     bootstrap_phase: str = DEFAULT_BOOTSTRAP_PHASE
     valid_cycles_count: int = 0

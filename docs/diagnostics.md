@@ -97,6 +97,8 @@ Interpretation:
 - `startup_sequence_active = true` means startup bootstrap is currently overriding the nominal command
 - `startup_sequence_cooling_temperature` is the temporary cooldown threshold, equal to `target - 0.3°C`
 - `startup_sequence_requested_power` is the power currently requested by the startup sequence
+- `current_cycle_percent` is the power committed for the currently engaged cycle
+- `next_cycle_percent` is the requested power prepared for the next scheduler cycle
 
 ### Last result and blocker
 
@@ -186,7 +188,8 @@ This mapping keeps the implementation-oriented names used by the algorithm.
   - `informative_deadtime_cycles_count`
   - `adaptive_cycles_since_phase_c`
   - `calculated_on_percent`
-  - `on_percent`
+  - `requested_on_percent`
+  - `committed_on_percent`
 - cross-check:
   - `b_crosscheck_error`
   - `b_methods_consistent`
@@ -259,7 +262,8 @@ If needed, enable debug mode and inspect:
 
 - `debug["last_cycle_classification"]`
 - `debug["calculated_on_percent"]`
-- `debug["on_percent"]`
+- `debug["requested_on_percent"]`
+- `debug["committed_on_percent"]`
 
 ## Persistence Note
 
