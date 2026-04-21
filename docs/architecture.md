@@ -245,17 +245,17 @@ Useful diagnostic groups:
   - `startup_sequence_attempt`
   - `startup_sequence_completion_reason`
 - estimator:
-  - `heating_rate_per_hour`
-  - `cooling_rate_per_hour`
-  - `heating_rate_confidence`
-  - `cooling_rate_confidence`
-  - `heating_rate_converged`
-  - `heating_samples`
-  - `cooling_samples`
+  - `control_rate_per_hour`
+  - `drift_rate_per_hour`
+  - `control_rate_confidence`
+  - `drift_rate_confidence`
+  - `control_rate_converged`
+  - `control_samples`
+  - `drift_samples`
   - `debug["a_last_reason"]`
   - `debug["b_last_reason"]`
 - routing:
-  - `heating_learning_enabled`
+  - `control_learning_enabled`
   - `debug["current_cycle_regime"]`
   - `debug["learning_route_selected"]`
   - `debug["learning_route_block_reason"]`

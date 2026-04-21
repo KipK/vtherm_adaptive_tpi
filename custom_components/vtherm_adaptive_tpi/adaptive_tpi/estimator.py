@@ -271,8 +271,13 @@ class ParameterEstimator:
         self.b_converged = self._compute_b_converged()
         return self._snapshot(i_a=0.0, i_b=0.0, a_updated=False, b_updated=False)
 
-    def update_a(self, sample: ASample | None, reason: str = "a_sample_missing") -> EstimatorUpdate:
-        """Update the heating authority estimator only."""
+    def update_a(
+        self,
+        sample: ASample | None,
+        reason: str = "a_sample_missing",
+        mode_sign: int = 1,
+    ) -> EstimatorUpdate:
+        """Update the actuator authority estimator only."""
         if sample is None:
             self._a_estimator.last_reason = reason
             return self._snapshot(i_a=0.0, i_b=0.0, a_updated=False, b_updated=False)
@@ -290,7 +295,9 @@ class ParameterEstimator:
             self._a_estimator.last_reason = "a_u_eff_too_small"
             return self._snapshot(i_a=1.0, i_b=0.0, a_updated=False, b_updated=False)
 
-        measurement = (sample.dTdt + (self.b_hat * sample.delta_out)) / sample.u_eff
+        # HEAT: dT/dt = a*u - b*delta_out  →  a = (dTdt + b*delta_out) / u
+        # COOL: dT/dt = -a*u - b*delta_out →  a = -(dTdt + b*delta_out) / u
+        measurement = mode_sign * (sample.dTdt + (self.b_hat * sample.delta_out)) / sample.u_eff
         if measurement < A_MIN:
             self._a_estimator.last_reason = "a_measurement_unphysical"
             return self._snapshot(i_a=1.0, i_b=0.0, a_updated=False, b_updated=False)

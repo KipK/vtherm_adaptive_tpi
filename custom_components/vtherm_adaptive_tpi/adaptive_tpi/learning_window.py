@@ -67,6 +67,7 @@ def build_learning_window(
     *,
     nd_hat: float,
     regime: str,
+    mode_sign: int = 1,
 ) -> LearningWindowResult:
     """Build the latest short bounded learning window for one regime."""
     if len(observations) < 2:
@@ -89,6 +90,7 @@ def build_learning_window(
         nd_hat=nd_hat,
         regime=regime,
         end_index=end_index,
+        mode_sign=mode_sign,
     )
 
 
@@ -98,6 +100,7 @@ def build_anchored_learning_window(
     nd_hat: float,
     regime: str,
     end_index: int,
+    mode_sign: int = 1,
 ) -> LearningWindowResult:
     """Build a bounded learning window anchored on one chosen cycle."""
     if len(observations) < 2:
@@ -156,6 +159,7 @@ def build_anchored_learning_window(
         end_index=end_index,
         guard_cycles=_setpoint_guard_cycles(nd_hat),
         regime=regime,
+        mode_sign=mode_sign,
     )
     if safe_start_index is None:
         return LearningWindowResult(
@@ -193,16 +197,18 @@ def build_anchored_learning_window(
 
     start_observation = observations[start_index]
     amplitude = end_observation.tin - start_observation.tin
-    if regime == WINDOW_REGIME_OFF and amplitude >= 0.0:
+    # In HEAT (+1): OFF window must cool (amplitude < 0), ON window must warm (amplitude > 0).
+    # In COOL (-1): signs are reversed — OFF warms, ON cools.
+    if regime == WINDOW_REGIME_OFF and mode_sign * amplitude >= 0.0:
         return LearningWindowResult(
             sample=None,
-            reason="off_window_external_gain",
+            reason="off_window_no_thermal_loss",
             waiting_next_cycle=False,
         )
-    if regime == WINDOW_REGIME_ON and amplitude <= 0.0:
+    if regime == WINDOW_REGIME_ON and mode_sign * amplitude <= 0.0:
         return LearningWindowResult(
             sample=None,
-            reason="on_window_no_heating_effect",
+            reason="on_window_no_actuator_effect",
             waiting_next_cycle=False,
         )
     if (
@@ -293,14 +299,19 @@ def _blocks_regime_for_setpoint(
     right: CycleHistoryEntry,
     *,
     regime: str,
+    mode_sign: int = 1,
 ) -> bool:
     """Return True when a setpoint jump contradicts the active learning regime."""
     if not _has_setpoint_jump(left, right):
         return False
+    delta_sp = right.target_temp - left.target_temp
+    # A jump is contradictory when it opposes the current regime direction.
+    # HEAT: ON tolerates upward jumps (+), OFF tolerates downward jumps (-).
+    # COOL: ON tolerates downward jumps (-), OFF tolerates upward jumps (+).
     if regime == WINDOW_REGIME_ON:
-        return right.target_temp < left.target_temp
+        return mode_sign * delta_sp < 0
     if regime == WINDOW_REGIME_OFF:
-        return right.target_temp > left.target_temp
+        return mode_sign * delta_sp > 0
     return True
 
 
@@ -321,6 +332,7 @@ def _safe_window_start_after_recent_setpoint_jump(
     end_index: int,
     guard_cycles: int,
     regime: str,
+    mode_sign: int = 1,
 ) -> int | None:
     """Return the earliest safe start index after the latest setpoint jump."""
     latest_jump_following_index: int | None = None
@@ -329,6 +341,7 @@ def _safe_window_start_after_recent_setpoint_jump(
             observations[index],
             observations[index + 1],
             regime=regime,
+            mode_sign=mode_sign,
         ):
             latest_jump_following_index = index + 1
 

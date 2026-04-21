@@ -8,23 +8,23 @@ from .state import AdaptiveTPIState
 _PUBLIC_PHASE_NAMES = {
     "startup": "startup",
     "phase_a": "deadtime_learning",
-    "phase_b": "cooling_learning",
-    "phase_c": "heating_learning",
+    "phase_b": "drift_learning",
+    "phase_c": "control_learning",
     "phase_d": "stabilized",
 }
 
 _PUBLIC_STARTUP_STAGE_NAMES = {
     "idle": "idle",
-    "preheat_to_target": "heating_to_target",
-    "cooldown_below_target": "cooling_below_target",
-    "reheat_to_target": "reheating_to_target",
+    "preheat_to_target": "active_to_target",
+    "cooldown_below_target": "passive_drift_phase",
+    "reheat_to_target": "reactivation_to_target",
     "completed": "completed",
     "abandoned": "abandoned",
 }
 
 _PUBLIC_LEARNING_FAMILY_NAMES = {
-    "a": "heating",
-    "b": "cooling",
+    "a": "control",
+    "b": "drift",
 }
 
 
@@ -56,8 +56,8 @@ def _tau_h(b_per_hour: float | None) -> float | None:
     return 1.0 / b_per_hour
 
 
-def _heating_rate_converged(state: AdaptiveTPIState) -> bool:
-    """Return True when the heating estimate meets the phase-C confidence target."""
+def _control_rate_converged(state: AdaptiveTPIState) -> bool:
+    """Return True when the actuator authority estimate meets the phase-C confidence target."""
     return state.c_a >= 0.6
 
 
@@ -88,7 +88,7 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
     a_per_hour = _per_hour(state.a_hat, cycle_min)
     b_per_hour = _per_hour(state.b_hat, cycle_min)
     tau_h = _tau_h(b_per_hour)
-    heating_converged = _heating_rate_converged(state)
+    control_converged = _control_rate_converged(state)
     data = {
         "adaptive_phase": _public_phase_name(state.bootstrap_phase),
         "gain_indoor": state.k_int,
@@ -98,17 +98,17 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
         "deadtime_cycles": state.nd_hat,
         "deadtime_minutes": _published_deadtime_minutes(state),
         "deadtime_confidence": state.c_nd,
-        "heating_rate_per_hour": a_per_hour,
-        "cooling_rate_per_hour": b_per_hour,
+        "control_rate_per_hour": a_per_hour,
+        "drift_rate_per_hour": b_per_hour,
         "thermal_time_constant_hours": tau_h,
-        "heating_rate_confidence": state.c_a,
-        "cooling_rate_confidence": state.c_b,
-        "heating_rate_converged": heating_converged,
-        "cooling_rate_converged": state.b_converged,
-        "heating_samples": state.a_samples_count,
-        "cooling_samples": state.b_samples_count,
+        "control_rate_confidence": state.c_a,
+        "drift_rate_confidence": state.c_b,
+        "control_rate_converged": control_converged,
+        "drift_rate_converged": state.b_converged,
+        "control_samples": state.a_samples_count,
+        "drift_samples": state.b_samples_count,
         "sample_window_size": WINDOW_HISTORY,
-        "heating_learning_enabled": state.a_learning_enabled,
+        "control_learning_enabled": state.a_learning_enabled,
         "startup_sequence_active": state.startup_bootstrap_active,
         "startup_sequence_stage": _public_startup_stage_name(
             state.startup_bootstrap_stage
@@ -140,7 +140,7 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
             "tau_min": (tau_h * 60.0) if tau_h is not None else None,
             "c_a": state.c_a,
             "c_b": state.c_b,
-            "heating_rate_converged": heating_converged,
+            "control_rate_converged": control_converged,
             "b_converged": state.b_converged,
             "i_a": state.i_a,
             "i_b": state.i_b,

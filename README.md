@@ -55,9 +55,9 @@ The normal progression is:
 
 Typical early observations are:
 
-- `heating_rate_per_hour` still unset
-- `heating_rate_converged = false`
-- `cooling_rate_converged = false`
+- `control_rate_per_hour` still unset
+- `control_rate_converged = false`
+- `drift_rate_converged = false`
 - gains still close to defaults
 - `startup_sequence_active = true` during the initial forced sequence
 
@@ -99,14 +99,14 @@ The most useful fields to inspect first are:
 - `startup_sequence_completion_reason`
 - `deadtime_cycles`
 - `deadtime_confidence`
-- `cooling_rate_per_hour`
-- `cooling_rate_confidence`
-- `cooling_samples`
+- `drift_rate_per_hour`
+- `drift_rate_confidence`
+- `drift_samples`
 - `sample_window_size`
-- `heating_rate_per_hour`
-- `heating_rate_confidence`
-- `heating_rate_converged`
-- `heating_samples`
+- `control_rate_per_hour`
+- `control_rate_confidence`
+- `control_rate_converged`
+- `control_samples`
 - `last_learning_result`
 - `last_learning_family`
 - `last_runtime_blocker`
@@ -114,8 +114,8 @@ The most useful fields to inspect first are:
 Healthy learning often looks like this:
 
 - `deadtime_cycles` starts moving before it is considered reliable
-- `cooling_rate_per_hour` appears before `heating_rate_per_hour`
-- `cooling_samples / sample_window_size` fills progressively until the rolling window is full
+- `drift_rate_per_hour` appears before `control_rate_per_hour`
+- `drift_samples / sample_window_size` fills progressively until the rolling window is full
 - `last_runtime_blocker` often stays related to deadtime or cooling convergence for a while
 - `gain_indoor` and `gain_outdoor` stay near defaults until confidence is good enough
 

@@ -4,24 +4,30 @@
 {% set name = thermostat_name or state_attr(entity, 'friendly_name') or entity %}
 {% set diag = ((state_attr(entity, 'specific_states') or {}).get('adaptive_tpi')) %}
 {% set debug = ((diag or {}).get('debug')) %}
+{% set hvac_mode = states(entity) %}
+{% set is_cool = hvac_mode == 'cool' %}
+{% set icon_control = '❄️' if is_cool else '🔥' %}
+{% set icon_drift = '☀️' if is_cool else '💨' %}
+{% set label_control = 'Cooling rate' if is_cool else 'Heating rate' %}
+{% set label_drift = 'Heating drift' if is_cool else 'Cooling drift' %}
 {% set phase_names = {
   'startup': 'Startup',
   'deadtime_learning': 'Deadtime',
-  'cooling_learning': 'Cooling',
-  'heating_learning': 'Heating',
+  'drift_learning': 'Drift learning',
+  'control_learning': 'Control learning',
   'stabilized': 'Stabilized'
 } %}
 {% set stage_names = {
   'idle': 'Idle',
-  'heating_to_target': 'Heating to setpoint',
-  'cooling_below_target': 'Cooling below setpoint',
-  'reheating_to_target': 'Reheating to setpoint',
+  'active_to_target': 'Active to setpoint',
+  'passive_drift_phase': 'Passive drift',
+  'reactivation_to_target': 'Reactivation to setpoint',
   'completed': 'Completed',
   'abandoned': 'Stopped'
 } %}
 {% set family_names = {
-  'heating': 'Heating',
-  'cooling': 'Cooling'
+  'control': 'Control',
+  'drift': 'Drift'
 } %}
 {% if not diag %}
 ## {{ name }}
@@ -35,15 +41,15 @@ No `specific_states.adaptive_tpi` data found for `{{ entity }}`.
 {% set deadtime_minutes = diag.get('deadtime_minutes') %}
 {% set deadtime_cycles = diag.get('deadtime_cycles') %}
 {% set deadtime_confidence = diag.get('deadtime_confidence') %}
-{% set heating_rate = diag.get('heating_rate_per_hour') %}
-{% set cooling_rate = diag.get('cooling_rate_per_hour') %}
+{% set control_rate = diag.get('control_rate_per_hour') %}
+{% set drift_rate = diag.get('drift_rate_per_hour') %}
 {% set tau_h = diag.get('thermal_time_constant_hours') %}
-{% set heating_samples = diag.get('heating_samples') %}
-{% set cooling_samples = diag.get('cooling_samples') %}
+{% set control_samples = diag.get('control_samples') %}
+{% set drift_samples = diag.get('drift_samples') %}
 {% set sample_window_size = diag.get('sample_window_size') or 12 %}
-{% set heating_enabled = diag.get('heating_learning_enabled') %}
-{% set heating_converged = diag.get('heating_rate_converged') %}
-{% set cooling_converged = diag.get('cooling_rate_converged') %}
+{% set control_enabled = diag.get('control_learning_enabled') %}
+{% set control_converged = diag.get('control_rate_converged') %}
+{% set drift_converged = diag.get('drift_rate_converged') %}
 {% set startup_active = diag.get('startup_sequence_active') %}
 {% set startup_attempt = diag.get('startup_sequence_attempt') %}
 {% set startup_max = diag.get('startup_sequence_max_attempts') %}
@@ -55,8 +61,8 @@ No `specific_states.adaptive_tpi` data found for `{{ entity }}`.
 {% set next_cycle_text = ((next_cycle * 100) | round(0) ~ ' %') if next_cycle is not none else 'Unavailable' %}
 {% set deadtime_text = (deadtime_minutes | round(1) ~ ' min') if deadtime_minutes is not none else ((deadtime_cycles | round(2) ~ ' cycle(s)') if deadtime_cycles is not none else 'Not measured') %}
 {% set deadtime_conf_text = ((deadtime_confidence * 100) | round(0) ~ ' %') if deadtime_confidence is not none else 'Unavailable' %}
-{% set heating_rate_text = (heating_rate | round(2) ~ ' °C/h') if heating_rate is not none else 'Pending' %}
-{% set cooling_rate_text = (cooling_rate | round(3) ~ ' 1/h') if cooling_rate is not none else 'Pending' %}
+{% set control_rate_text = (control_rate | round(2) ~ ' °C/h') if control_rate is not none else 'Pending' %}
+{% set drift_rate_text = (drift_rate | round(3) ~ ' 1/h') if drift_rate is not none else 'Pending' %}
 {% set tau_text = (tau_h | round(2) ~ ' h') if tau_h is not none else 'Pending' %}
 
 ## 🧠 {{ name }}
@@ -66,7 +72,8 @@ No `specific_states.adaptive_tpi` data found for `{{ entity }}`.
 | Overview | Value |
 |---|---|
 | 🧭 Phase | **{{ phase }}** |
-| 🔥 Current cycle | **{{ current_cycle_text }}** |
+| 🌡️ Mode | **{{ hvac_mode }}** |
+| {{ icon_control }} Current cycle | **{{ current_cycle_text }}** |
 | ⏭️ Next cycle | **{{ next_cycle_text }}** |
 | 🚀 Startup | **{{ 'Active - ' ~ stage if startup_active else 'Inactive' }}** |
 
@@ -74,17 +81,17 @@ No `specific_states.adaptive_tpi` data found for `{{ entity }}`.
 |---|---|
 | ⏳ Deadtime | **{{ deadtime_text }}** |
 | 🎯 Deadtime confidence | **{{ deadtime_conf_text }}** |
-| 📈 Heating rate | **{{ heating_rate_text }}** |
-| 📉 Cooling rate | **{{ cooling_rate_text }}** |
+| {{ icon_control }} {{ label_control }} | **{{ control_rate_text }}** |
+| {{ icon_drift }} {{ label_drift }} | **{{ drift_rate_text }}** |
 | 🏠 Thermal constant | **{{ tau_text }}** |
 
 | Model status | Value |
 |---|---|
-| ❄️ Cooling model | **{{ 'Stable' if cooling_converged else 'Learning' }}** |
-| ♨️ Heating model | **{{ 'Stable' if heating_converged else 'Learning' }}** |
-| ♨️ Heating learning | **{{ 'Allowed' if heating_enabled else 'Not yet' }}** |
-| ❄️ Cooling samples | **{{ (cooling_samples if cooling_samples is not none else 0) ~ ' / ' ~ sample_window_size }}** |
-| ♨️ Heating samples | **{{ (heating_samples if heating_samples is not none else 0) ~ ' / ' ~ sample_window_size }}** |
+| {{ icon_drift }} Drift model | **{{ 'Stable' if drift_converged else 'Learning' }}** |
+| {{ icon_control }} Control model | **{{ 'Stable' if control_converged else 'Learning' }}** |
+| {{ icon_control }} Control learning | **{{ 'Allowed' if control_enabled else 'Not yet' }}** |
+| {{ icon_drift }} Drift samples | **{{ (drift_samples if drift_samples is not none else 0) ~ ' / ' ~ sample_window_size }}** |
+| {{ icon_control }} Control samples | **{{ (control_samples if control_samples is not none else 0) ~ ' / ' ~ sample_window_size }}** |
 
 | Recent activity | Value |
 |---|---|
@@ -122,7 +129,7 @@ No `specific_states.adaptive_tpi` data found for `{{ entity }}`.
 | `b_hat` | {{ debug.get('b_hat') | round(4) if debug.get('b_hat') is not none else 'Unavailable' }} |
 | `c_a` | {{ ((debug.get('c_a') * 100) | round(0) ~ ' %') if debug.get('c_a') is not none else 'Unavailable' }} |
 | `c_b` | {{ ((debug.get('c_b') * 100) | round(0) ~ ' %') if debug.get('c_b') is not none else 'Unavailable' }} |
-| `heating_rate_converged` | {{ 'Yes' if debug.get('heating_rate_converged') else 'No' }} |
+| `control_rate_converged` | {{ 'Yes' if debug.get('control_rate_converged') else 'No' }} |
 | `b_converged` | {{ 'Yes' if debug.get('b_converged') else 'No' }} |
 
 | Deadtime | Value |

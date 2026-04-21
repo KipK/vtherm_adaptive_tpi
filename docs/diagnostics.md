@@ -22,8 +22,8 @@ Possible values:
 
 - `startup`
 - `deadtime_learning`
-- `cooling_learning`
-- `heating_learning`
+- `drift_learning`
+- `control_learning`
 - `stabilized`
 
 ### Gains
@@ -48,35 +48,35 @@ Interpretation:
 
 ### Heating and cooling rates
 
-- `heating_rate_per_hour`
-- `cooling_rate_per_hour`
+- `control_rate_per_hour`
+- `drift_rate_per_hour`
 - `thermal_time_constant_hours`
-- `heating_rate_confidence`
-- `cooling_rate_confidence`
-- `heating_rate_converged`
-- `cooling_rate_converged`
+- `control_rate_confidence`
+- `drift_rate_confidence`
+- `control_rate_converged`
+- `drift_rate_converged`
 
 Interpretation:
 
-- `heating_rate_per_hour` is the learned heating authority normalized in `°C/hour`
-- `cooling_rate_per_hour` is the learned cooling loss rate normalized in `1/hour`
+- `control_rate_per_hour` is the learned heating authority normalized in `°C/hour`
+- `drift_rate_per_hour` is the learned cooling loss rate normalized in `1/hour`
 - `thermal_time_constant_hours` is derived from the cooling rate
-- `heating_rate_converged` indicates whether the heating estimate has reached the confidence target used by Phase C stabilization checks
-- `cooling_rate_converged` indicates whether cooling estimation is stable enough to open heating learning
+- `control_rate_converged` indicates whether the heating estimate has reached the confidence target used by Phase C stabilization checks
+- `drift_rate_converged` indicates whether cooling estimation is stable enough to open heating learning
 
 ### Sample counters
 
-- `heating_samples`
-- `cooling_samples`
+- `control_samples`
+- `drift_samples`
 - `sample_window_size`
-- `heating_learning_enabled`
+- `control_learning_enabled`
 
 Interpretation:
 
-- `heating_samples` counts accepted `a` updates
-- `cooling_samples` counts accepted `b` updates
+- `control_samples` counts accepted `a` updates
+- `drift_samples` counts accepted `b` updates
 - `sample_window_size` exposes the rolling estimator capacity used by both counters
-- `heating_learning_enabled` indicates whether runtime conditions allow `a` learning when an ON window is valid
+- `control_learning_enabled` indicates whether runtime conditions allow `a` learning when an ON window is valid
 
 ### Startup sequence
 
@@ -89,9 +89,9 @@ Interpretation:
 Possible `startup_sequence_stage` values:
 
 - `idle`
-- `heating_to_target`
-- `cooling_below_target`
-- `reheating_to_target`
+- `active_to_target`
+- `passive_drift_phase`
+- `reactivation_to_target`
 - `completed`
 - `abandoned`
 
@@ -204,10 +204,10 @@ For normal monitoring, read the diagnostics in this order:
 3. `startup_sequence_stage`
 4. `deadtime_cycles`
 5. `deadtime_confidence`
-6. `cooling_rate_per_hour`
-7. `cooling_rate_converged`
-8. `heating_rate_per_hour`
-9. `heating_rate_converged`
+6. `drift_rate_per_hour`
+7. `drift_rate_converged`
+8. `control_rate_per_hour`
+9. `control_rate_converged`
 10. `last_learning_result`
 11. `last_runtime_blocker`
 
@@ -227,9 +227,9 @@ Look at:
 
 Look at:
 
-- `cooling_samples`
-- `cooling_rate_per_hour`
-- `cooling_rate_confidence`
+- `drift_samples`
+- `drift_rate_per_hour`
+- `drift_rate_confidence`
 - `last_learning_result`
 
 If needed, enable debug mode and inspect:
@@ -242,11 +242,11 @@ If needed, enable debug mode and inspect:
 
 Look at:
 
-- `heating_learning_enabled`
-- `cooling_rate_converged`
-- `heating_rate_converged`
+- `control_learning_enabled`
+- `drift_rate_converged`
+- `control_rate_converged`
 - `deadtime_confidence`
-- `heating_samples`
+- `control_samples`
 - `last_runtime_blocker`
 
 If needed, enable debug mode and inspect:

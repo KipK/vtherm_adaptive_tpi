@@ -63,6 +63,7 @@ class StartupBootstrapController:
         current_temp: float | None,
         deadtime_identification_count: int,
         heating_enabled: bool,
+        mode_sign: int = 1,
     ) -> StartupBootstrapSnapshot:
         """Return the current bootstrap decision and optional power override."""
         if target_temp is None or current_temp is None:
@@ -71,7 +72,10 @@ class StartupBootstrapController:
                 command_on_percent=None,
             )
 
-        lower_target_temp = target_temp - self._lower_delta_c
+        # lower_target_temp is the passive-drift threshold used for the OFF step.
+        # In HEAT: target - delta (below setpoint).
+        # In COOL: target + delta (above setpoint).
+        lower_target_temp = target_temp - mode_sign * self._lower_delta_c
         if not heating_enabled:
             return self._snapshot(
                 target_temp=target_temp,
@@ -98,7 +102,9 @@ class StartupBootstrapController:
                     lower_target_temp=lower_target_temp,
                     command_on_percent=None,
                 )
-            if current_temp >= target_temp:
+            # HEAT: start COOLDOWN if already at/above target, else PREHEAT.
+            # COOL: start COOLDOWN if already at/below target, else PREHEAT.
+            if mode_sign * (current_temp - target_temp) >= 0:
                 self._stage = STARTUP_BOOTSTRAP_COOLDOWN
                 self._attempt = 1
             else:
@@ -108,7 +114,7 @@ class StartupBootstrapController:
             self._sync_force_state()
 
         if self._stage == STARTUP_BOOTSTRAP_PREHEAT:
-            if current_temp >= target_temp:
+            if mode_sign * (current_temp - target_temp) >= 0:
                 self._stage = STARTUP_BOOTSTRAP_COOLDOWN
                 self._attempt = max(self._attempt, 1)
                 self._sync_force_state()
@@ -124,7 +130,9 @@ class StartupBootstrapController:
             )
 
         if self._stage == STARTUP_BOOTSTRAP_COOLDOWN:
-            if current_temp <= lower_target_temp:
+            # HEAT: wait until current <= lower_target  →  mode_sign*(current - lower) <= 0
+            # COOL: wait until current >= lower_target  →  mode_sign*(current - lower) <= 0
+            if mode_sign * (current_temp - lower_target_temp) <= 0:
                 self._stage = STARTUP_BOOTSTRAP_REHEAT
                 self._attempt = max(self._attempt, 1)
                 self._sync_force_state()
@@ -140,7 +148,7 @@ class StartupBootstrapController:
             )
 
         if self._stage == STARTUP_BOOTSTRAP_REHEAT:
-            if current_temp >= target_temp:
+            if mode_sign * (current_temp - target_temp) >= 0:
                 if deadtime_identification_count > 0:
                     self._stage = STARTUP_BOOTSTRAP_COMPLETED
                     self._completion_reason = "deadtime_identified"
@@ -186,6 +194,7 @@ class StartupBootstrapController:
         current_temp: float | None,
         deadtime_identification_count: int,
         heating_enabled: bool,
+        mode_sign: int = 1,
     ) -> bool:
         """Return True when the current bootstrap stage should end immediately."""
         self._sync_force_state()
@@ -194,7 +203,7 @@ class StartupBootstrapController:
         if target_temp is None or current_temp is None or not heating_enabled:
             return False
 
-        lower_target_temp = target_temp - self._lower_delta_c
+        lower_target_temp = target_temp - mode_sign * self._lower_delta_c
         if (
             deadtime_identification_count > 0
             and self._stage in STARTUP_BOOTSTRAP_ACTIVE_STAGES
@@ -202,10 +211,10 @@ class StartupBootstrapController:
             self._force_requested_for_stage = True
             return True
         if self._stage in (STARTUP_BOOTSTRAP_PREHEAT, STARTUP_BOOTSTRAP_REHEAT):
-            if current_temp >= target_temp:
+            if mode_sign * (current_temp - target_temp) >= 0:
                 self._force_requested_for_stage = True
                 return True
-        if self._stage == STARTUP_BOOTSTRAP_COOLDOWN and current_temp <= lower_target_temp:
+        if self._stage == STARTUP_BOOTSTRAP_COOLDOWN and mode_sign * (current_temp - lower_target_temp) <= 0:
             self._force_requested_for_stage = True
             return True
         return False

@@ -21,8 +21,8 @@ Valeurs possibles :
 
 - `startup`
 - `deadtime_learning`
-- `cooling_learning`
-- `heating_learning`
+- `drift_learning`
+- `control_learning`
 - `stabilized`
 
 ### Gains
@@ -47,35 +47,35 @@ Interprétation :
 
 ### Taux de chauffage et de refroidissement
 
-- `heating_rate_per_hour`
-- `cooling_rate_per_hour`
+- `control_rate_per_hour`
+- `drift_rate_per_hour`
 - `thermal_time_constant_hours`
-- `heating_rate_confidence`
-- `cooling_rate_confidence`
-- `heating_rate_converged`
-- `cooling_rate_converged`
+- `control_rate_confidence`
+- `drift_rate_confidence`
+- `control_rate_converged`
+- `drift_rate_converged`
 
 Interprétation :
 
-- `heating_rate_per_hour` est l'autorité de chauffage apprise normalisée en `°C/heure`
-- `cooling_rate_per_hour` est le taux de perte de refroidissement appris normalisé en `1/heure`
+- `control_rate_per_hour` est l'autorité de chauffage apprise normalisée en `°C/heure`
+- `drift_rate_per_hour` est le taux de perte de refroidissement appris normalisé en `1/heure`
 - `thermal_time_constant_hours` est dérivé du taux de refroidissement
-- `heating_rate_converged` indique si l'estimation du chauffage a atteint le niveau de confiance utilisé par les vérifications de stabilisation de la phase C
-- `cooling_rate_converged` indique si l'estimation du refroidissement est stable enough pour ouvrir l'apprentissage du chauffage
+- `control_rate_converged` indique si l'estimation du chauffage a atteint le niveau de confiance utilisé par les vérifications de stabilisation de la phase C
+- `drift_rate_converged` indique si l'estimation du refroidissement est stable enough pour ouvrir l'apprentissage du chauffage
 
 ### Compteurs d'échantillons
 
-- `heating_samples`
-- `cooling_samples`
+- `control_samples`
+- `drift_samples`
 - `sample_window_size`
-- `heating_learning_enabled`
+- `control_learning_enabled`
 
 Interprétation :
 
-- `heating_samples` compte les mises à jour `a` acceptées
-- `cooling_samples` compte les mises à jour `b` acceptées
+- `control_samples` compte les mises à jour `a` acceptées
+- `drift_samples` compte les mises à jour `b` acceptées
 - `sample_window_size` expose la capacité de la fenêtre glissante utilisée par les deux compteurs
-- `heating_learning_enabled` indique si les conditions d'exécution permettent l'apprentissage `a` quand une fenêtre ON est valide
+- `control_learning_enabled` indique si les conditions d'exécution permettent l'apprentissage `a` quand une fenêtre ON est valide
 
 ### Séquence de démarrage
 
@@ -88,9 +88,9 @@ Interprétation :
 Valeurs possibles de `startup_sequence_stage` :
 
 - `idle`
-- `heating_to_target`
-- `cooling_below_target`
-- `reheating_to_target`
+- `active_to_target`
+- `passive_drift_phase`
+- `reactivation_to_target`
 - `completed`
 - `abandoned`
 
@@ -202,10 +202,10 @@ Pour la surveillance normale, lisez les diagnostiques dans cet ordre :
 3. `startup_sequence_stage`
 4. `deadtime_cycles`
 5. `deadtime_confidence`
-6. `cooling_rate_per_hour`
-7. `cooling_rate_converged`
-8. `heating_rate_per_hour`
-9. `heating_rate_converged`
+6. `drift_rate_per_hour`
+7. `drift_rate_converged`
+8. `control_rate_per_hour`
+9. `control_rate_converged`
 10. `last_learning_result`
 11. `last_runtime_blocker`
 
@@ -225,9 +225,9 @@ Regardez :
 
 Regardez :
 
-- `cooling_samples`
-- `cooling_rate_per_hour`
-- `cooling_rate_confidence`
+- `drift_samples`
+- `drift_rate_per_hour`
+- `drift_rate_confidence`
 - `last_learning_result`
 
 Si nécessaire, activez le mode débogage et inspectez :
@@ -240,11 +240,11 @@ Si nécessaire, activez le mode débogage et inspectez :
 
 Regardez :
 
-- `heating_learning_enabled`
-- `cooling_rate_converged`
-- `heating_rate_converged`
+- `control_learning_enabled`
+- `drift_rate_converged`
+- `control_rate_converged`
 - `deadtime_confidence`
-- `heating_samples`
+- `control_samples`
 - `last_runtime_blocker`
 
 Si nécessaire, activez le mode débogage et inspectez :

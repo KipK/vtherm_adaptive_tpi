@@ -24,6 +24,7 @@ from .adaptive_tpi.startup_bootstrap import (
     StartupBootstrapController,
     StartupBootstrapSnapshot,
 )
+from .adaptive_tpi.mode import hvac_mode_sign
 from .adaptive_tpi.state import AdaptiveTPIState
 from .adaptive_tpi.supervisor import AdaptiveTPISupervisor, PHASE_A, PHASE_B
 from .const import DEFAULT_KEXT, DEFAULT_KINT, DEFAULT_RESPONSIVENESS, RESPONSIVENESS_TO_TAU_CL_MIN
@@ -109,9 +110,8 @@ class AdaptiveTPIAlgorithm:
             setpoint_transition_active=bool(kwargs.get("setpoint_transition_active", False)),
         )
         self._supervisor.apply_to_state(self._state)
-        heating_enabled = hvac_mode is not None and not str(hvac_mode).lower().endswith(
-            ("off", "sleep")
-        )
+        sign = hvac_mode_sign(hvac_mode)
+        heating_enabled = sign != 0
 
         if target_temp is None or current_temp is None:
             self._apply_startup_bootstrap_snapshot(
@@ -120,6 +120,7 @@ class AdaptiveTPIAlgorithm:
                     current_temp=current_temp,
                     deadtime_identification_count=self._state.deadtime_identification_count,
                     heating_enabled=heating_enabled,
+                    mode_sign=sign,
                 )
             )
             self._state.calculated_on_percent = 0.0
@@ -136,12 +137,14 @@ class AdaptiveTPIAlgorithm:
             k_int=self._state.k_int,
             k_ext=self._state.k_ext,
             max_on_percent=self._max_on_percent,
+            mode_sign=sign,
         )
         bootstrap_snapshot = self._startup_bootstrap.evaluate(
             target_temp=target_temp,
             current_temp=current_temp,
             deadtime_identification_count=self._state.deadtime_identification_count,
             heating_enabled=heating_enabled,
+            mode_sign=sign,
         )
         self._apply_startup_bootstrap_snapshot(bootstrap_snapshot)
         if bootstrap_snapshot.command_on_percent is not None:
@@ -289,6 +292,7 @@ class AdaptiveTPIAlgorithm:
             is_informative=deadtime_informative,
             is_estimator_informative=estimator_informative,
             bootstrap_b_learning_allowed=pending_cycle.bootstrap_b_learning_allowed,
+            mode_sign=hvac_mode_sign(pending_cycle.hvac_mode),
         )
         self._state.nd_hat = deadtime_result.nd_hat
         self._state.deadtime_minutes = deadtime_result.nd_minutes
@@ -331,6 +335,7 @@ class AdaptiveTPIAlgorithm:
         )
         anchored_end_index = len(observations) - 2
 
+        pending_mode_sign = hvac_mode_sign(pending_cycle.hvac_mode)
         if current_cycle_regime == WINDOW_REGIME_OFF:
             self._state.learning_route_selected = "b"
             off_window = build_anchored_learning_window(
@@ -338,6 +343,7 @@ class AdaptiveTPIAlgorithm:
                 nd_hat=self._state.nd_hat,
                 regime=WINDOW_REGIME_OFF,
                 end_index=anchored_end_index,
+                mode_sign=pending_mode_sign,
             )
             self._state.deadtime_learning_blackout_active = off_window.deadtime_blackout_active
             self._state.last_learning_attempt_regime = "b"
@@ -363,6 +369,7 @@ class AdaptiveTPIAlgorithm:
                 nd_hat=self._state.nd_hat,
                 regime=WINDOW_REGIME_ON,
                 end_index=anchored_end_index,
+                mode_sign=pending_mode_sign,
             )
             self._state.deadtime_learning_blackout_active = on_window.deadtime_blackout_active
             self._state.last_learning_attempt_regime = "a"
@@ -380,6 +387,7 @@ class AdaptiveTPIAlgorithm:
                         u_eff=on_window.sample.u_eff,
                     ),
                     reason=on_window.reason,
+                    mode_sign=pending_mode_sign,
                 )
             else:
                 self._state.learning_route_block_reason = (
@@ -742,6 +750,7 @@ class AdaptiveTPIAlgorithm:
             is_informative=is_informative,
             is_estimator_informative=is_estimator_informative,
             bootstrap_b_learning_allowed=sample.bootstrap_b_learning_allowed,
+            mode_sign=hvac_mode_sign(sample.hvac_mode),
         )
 
     def _refresh_projected_gains(self) -> None:
@@ -780,12 +789,11 @@ class AdaptiveTPIAlgorithm:
         hvac_mode,
     ) -> bool:
         """Return True when bootstrap threshold crossing should force a new cycle."""
-        heating_enabled = hvac_mode is not None and not str(hvac_mode).lower().endswith(
-            ("off", "sleep")
-        )
+        sign = hvac_mode_sign(hvac_mode)
         return self._startup_bootstrap.should_force_cycle_restart(
             target_temp=target_temp,
             current_temp=current_temp,
             deadtime_identification_count=self._state.deadtime_identification_count,
-            heating_enabled=heating_enabled,
+            heating_enabled=sign != 0,
+            mode_sign=sign,
         )

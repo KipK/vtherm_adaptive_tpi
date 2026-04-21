@@ -131,12 +131,14 @@ def _find_latest_step(
 def _measure_rise_delay(
     observations: tuple[CycleHistoryEntry, ...],
     step_index: int,
+    mode_sign: int = 1,
 ) -> StepIdentification | str:
-    """Measure delay from step edge to first visible temperature rise.
+    """Measure delay from step edge to first visible temperature response.
 
-    Returns _RESPONSE_PENDING while no rise or abort has occurred yet,
-    _RESPONSE_ABORTED on power drop or setpoint jump before the rise,
-    or a StepIdentification when a rise (or ceiling) is detected.
+    In HEAT mode the response is a temperature rise; in COOL mode a drop.
+    Returns _RESPONSE_PENDING while no response or abort has occurred yet,
+    _RESPONSE_ABORTED on power drop or setpoint jump before the response,
+    or a StepIdentification when a response (or ceiling) is detected.
     """
     tin_at_step = observations[step_index].tin
     n = len(observations)
@@ -151,8 +153,8 @@ def _measure_rise_delay(
         if abs(entry.target_temp - observations[i - 1].target_temp) > MAX_SETPOINT_JUMP:
             return _RESPONSE_ABORTED
 
-        cumulative_rise = entry.tin - tin_at_step
-        step_rise = entry.tin - observations[i - 1].tin
+        cumulative_rise = mode_sign * (entry.tin - tin_at_step)
+        step_rise = mode_sign * (entry.tin - observations[i - 1].tin)
 
         rise_detected = cumulative_rise >= RISE_EPSILON or step_rise >= RISE_EPSILON_STEP
         ceiling_hit = n_cycles >= N_MAX_RISE_CYCLES
@@ -301,6 +303,7 @@ class DeadtimeModel:
         is_informative: bool,
         is_estimator_informative: bool = False,
         bootstrap_b_learning_allowed: bool = False,
+        mode_sign: int = 1,
     ) -> DeadtimeSearchResult:
         """Append one cycle and trigger step detection when valid."""
         self._cycle_history.append(
@@ -319,17 +322,17 @@ class DeadtimeModel:
         self._trim_history_if_needed()
 
         if is_valid:
-            self.last_result = self.evaluate()
+            self.last_result = self.evaluate(mode_sign=mode_sign)
 
         return self.last_result
 
-    def evaluate(self, *, track_winner: bool = True) -> DeadtimeSearchResult:
+    def evaluate(self, *, track_winner: bool = True, mode_sign: int = 1) -> DeadtimeSearchResult:
         """Scan for step identifications and recompute nd_hat."""
         del track_winner
         observations = tuple(self._cycle_history)
 
         if self._pending_step_index is not None:
-            result = _measure_rise_delay(observations, self._pending_step_index)
+            result = _measure_rise_delay(observations, self._pending_step_index, mode_sign)
             if isinstance(result, StepIdentification):
                 self._identifications.append(result)
                 self._last_processed_step_index = self._pending_step_index

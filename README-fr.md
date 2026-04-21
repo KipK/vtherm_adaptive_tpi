@@ -49,9 +49,9 @@ La progression normale est :
 
 Les observations initiales typiques sont :
 
-- `heating_rate_per_hour` toujours non défini
-- `heating_rate_converged = false`
-- `cooling_rate_converged = false`
+- `control_rate_per_hour` toujours non défini
+- `control_rate_converged = false`
+- `drift_rate_converged = false`
 - les gains toujours proches des valeurs par défaut
 - `startup_sequence_active = true` pendant la séquence forcée initiale
 
@@ -93,14 +93,14 @@ Les champs les plus utiles à inspecter en premier sont :
 - `startup_sequence_completion_reason`
 - `deadtime_cycles`
 - `deadtime_confidence`
-- `cooling_rate_per_hour`
-- `cooling_rate_confidence`
-- `cooling_samples`
+- `drift_rate_per_hour`
+- `drift_rate_confidence`
+- `drift_samples`
 - `sample_window_size`
-- `heating_rate_per_hour`
-- `heating_rate_confidence`
-- `heating_rate_converged`
-- `heating_samples`
+- `control_rate_per_hour`
+- `control_rate_confidence`
+- `control_rate_converged`
+- `control_samples`
 - `last_learning_result`
 - `last_learning_family`
 - `last_runtime_blocker`
@@ -108,8 +108,8 @@ Les champs les plus utiles à inspecter en premier sont :
 Un apprentissage sain ressemble souvent à ceci :
 
 - `deadtime_cycles` commence à bouger avant d'être considéré comme fiable
-- `cooling_rate_per_hour` apparaît avant `heating_rate_per_hour`
-- `cooling_samples / sample_window_size` se remplit progressivement jusqu'à saturation de la fenêtre glissante
+- `drift_rate_per_hour` apparaît avant `control_rate_per_hour`
+- `drift_samples / sample_window_size` se remplit progressivement jusqu'à saturation de la fenêtre glissante
 - `last_runtime_blocker` reste souvent lié au temps mort ou à la convergence du refroidissement pendant un certain temps
 - `gain_indoor` et `gain_outdoor` restent proches des valeurs par défaut jusqu'à ce que la confiance soit suffisante
 

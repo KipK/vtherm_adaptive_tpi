@@ -103,10 +103,10 @@ def test_startup_with_no_history_keeps_bootstrap_defaults() -> None:
     assert diagnostics["startup_sequence_stage"] == "idle"
     assert diagnostics["startup_sequence_attempt"] == 0
     assert diagnostics["startup_sequence_max_attempts"] == 2
-    assert diagnostics["heating_rate_per_hour"] is None
-    assert diagnostics["cooling_rate_per_hour"] is None
+    assert diagnostics["control_rate_per_hour"] is None
+    assert diagnostics["drift_rate_per_hour"] is None
     assert diagnostics["thermal_time_constant_hours"] is None
-    assert diagnostics["heating_rate_converged"] is False
+    assert diagnostics["control_rate_converged"] is False
 
 
 def test_startup_bootstrap_cools_down_immediately_when_temperature_is_at_setpoint() -> None:
@@ -125,7 +125,7 @@ def test_startup_bootstrap_cools_down_immediately_when_temperature_is_at_setpoin
     assert algo.requested_on_percent == pytest.approx(0.0)
     assert algo.on_percent == pytest.approx(0.0)
     assert diagnostics["startup_sequence_active"] is True
-    assert diagnostics["startup_sequence_stage"] == "cooling_below_target"
+    assert diagnostics["startup_sequence_stage"] == "passive_drift_phase"
     assert diagnostics["startup_sequence_attempt"] == 1
 
 
@@ -143,7 +143,7 @@ def test_startup_bootstrap_retries_a_second_deadtime_cycle_when_first_one_fails(
     diagnostics = algo.get_diagnostics()
     assert algo.requested_on_percent == pytest.approx(1.0)
     assert algo.on_percent == pytest.approx(0.0)
-    assert diagnostics["startup_sequence_stage"] == "heating_to_target"
+    assert diagnostics["startup_sequence_stage"] == "active_to_target"
 
     algo.calculate(
         target_temp=20.0,
@@ -165,7 +165,7 @@ def test_startup_bootstrap_retries_a_second_deadtime_cycle_when_first_one_fails(
     diagnostics = algo.get_diagnostics()
     assert algo.requested_on_percent == pytest.approx(1.0)
     assert algo.on_percent == pytest.approx(0.0)
-    assert diagnostics["startup_sequence_stage"] == "reheating_to_target"
+    assert diagnostics["startup_sequence_stage"] == "reactivation_to_target"
 
     algo.calculate(
         target_temp=20.0,
@@ -179,7 +179,62 @@ def test_startup_bootstrap_retries_a_second_deadtime_cycle_when_first_one_fails(
     assert algo.requested_on_percent == pytest.approx(0.0)
     assert algo.on_percent == pytest.approx(0.0)
     assert diagnostics["startup_sequence_active"] is True
-    assert diagnostics["startup_sequence_stage"] == "cooling_below_target"
+    assert diagnostics["startup_sequence_stage"] == "passive_drift_phase"
+    assert diagnostics["startup_sequence_attempt"] == 2
+    assert diagnostics["startup_sequence_completion_reason"] is None
+
+
+def test_startup_bootstrap_retries_a_second_deadtime_cycle_in_cool_mode() -> None:
+    """Startup bootstrap should mirror the retry sequence when cooling is active."""
+    algo = AdaptiveTPIAlgorithm(name="test-startup-bootstrap-retry-cool")
+
+    algo.calculate(
+        target_temp=25.0,
+        current_temp=25.5,
+        ext_current_temp=30.0,
+        slope=None,
+        hvac_mode="cool",
+    )
+    diagnostics = algo.get_diagnostics()
+    assert algo.requested_on_percent == pytest.approx(1.0)
+    assert algo.on_percent == pytest.approx(0.0)
+    assert diagnostics["startup_sequence_stage"] == "active_to_target"
+
+    algo.calculate(
+        target_temp=25.0,
+        current_temp=25.0,
+        ext_current_temp=30.0,
+        slope=None,
+        hvac_mode="cool",
+    )
+    assert algo.requested_on_percent == pytest.approx(0.0)
+    assert algo.on_percent == pytest.approx(0.0)
+
+    algo.calculate(
+        target_temp=25.0,
+        current_temp=25.3,
+        ext_current_temp=30.0,
+        slope=None,
+        hvac_mode="cool",
+    )
+    diagnostics = algo.get_diagnostics()
+    assert algo.requested_on_percent == pytest.approx(1.0)
+    assert algo.on_percent == pytest.approx(0.0)
+    assert diagnostics["startup_sequence_stage"] == "reactivation_to_target"
+
+    algo.calculate(
+        target_temp=25.0,
+        current_temp=25.0,
+        ext_current_temp=30.0,
+        slope=None,
+        hvac_mode="cool",
+    )
+
+    diagnostics = algo.get_diagnostics()
+    assert algo.requested_on_percent == pytest.approx(0.0)
+    assert algo.on_percent == pytest.approx(0.0)
+    assert diagnostics["startup_sequence_active"] is True
+    assert diagnostics["startup_sequence_stage"] == "passive_drift_phase"
     assert diagnostics["startup_sequence_attempt"] == 2
     assert diagnostics["startup_sequence_completion_reason"] is None
 
@@ -246,7 +301,7 @@ def test_startup_bootstrap_exits_if_deadtime_arrives_after_reheat_cycle_closed()
     )
 
     diagnostics = algo.get_diagnostics()
-    assert diagnostics["startup_sequence_stage"] == "cooling_below_target"
+    assert diagnostics["startup_sequence_stage"] == "passive_drift_phase"
     assert diagnostics["startup_sequence_attempt"] == 2
 
     algo._state.deadtime_identification_count = 1
@@ -447,7 +502,7 @@ async def test_handler_refreshes_diagnostics_after_forced_control_pass() -> None
     )
     handler = object.__new__(AdaptiveTPIHandler)
     handler._thermostat = thermostat
-    handler._published_diagnostics = {"startup_sequence_stage": "cooling_below_target"}
+    handler._published_diagnostics = {"startup_sequence_stage": "passive_drift_phase"}
     handler._should_publish_intermediate = False
 
     await handler.control_heating(force=True)
@@ -469,8 +524,8 @@ def test_diagnostics_expose_normalized_units_when_cycle_duration_is_known() -> N
 
     assert diagnostics["deadtime_cycles"] == pytest.approx(2.0)
     assert diagnostics["deadtime_minutes"] == pytest.approx(10.0)
-    assert diagnostics["heating_rate_per_hour"] == pytest.approx(2.4)
-    assert diagnostics["cooling_rate_per_hour"] == pytest.approx(0.36)
+    assert diagnostics["control_rate_per_hour"] == pytest.approx(2.4)
+    assert diagnostics["drift_rate_per_hour"] == pytest.approx(0.36)
     assert diagnostics["thermal_time_constant_hours"] == pytest.approx(1.0 / 0.36)
 
 
@@ -1454,7 +1509,7 @@ def test_learning_window_rejects_off_window_when_temperature_rises() -> None:
     )
 
     assert result.sample is None
-    assert result.reason == "off_window_external_gain"
+    assert result.reason == "off_window_no_thermal_loss"
 
 
 def test_learning_window_rejects_on_window_when_temperature_drops() -> None:
@@ -1497,7 +1552,7 @@ def test_learning_window_rejects_on_window_when_temperature_drops() -> None:
     )
 
     assert result.sample is None
-    assert result.reason == "on_window_no_heating_effect"
+    assert result.reason == "on_window_no_actuator_effect"
 
 
 def test_estimator_can_learn_b_on_zero_power_cycles() -> None:
@@ -1694,8 +1749,8 @@ def test_completed_on_cycle_routes_to_a_not_b(monkeypatch: pytest.MonkeyPatch) -
     diagnostics = algo.get_diagnostics()
     assert diagnostics["debug"]["current_cycle_regime"] == "on"
     assert diagnostics["debug"]["learning_route_selected"] == "a"
-    assert diagnostics["last_learning_family"] == "heating"
-    assert diagnostics["heating_samples"] >= 1
+    assert diagnostics["last_learning_family"] == "control"
+    assert diagnostics["control_samples"] >= 1
 
 
 def test_deadtime_history_keeps_committed_cycle_power(
@@ -1840,7 +1895,7 @@ def test_bootstrap_cooldown_off_cycle_can_update_b_near_setpoint(
     assert diagnostics["debug"]["learning_route_selected"] == "b"
     assert diagnostics["last_learning_result"] == "sample_accepted"
     assert diagnostics["debug"]["b_last_reason"] == "sample_accepted"
-    assert diagnostics["cooling_samples"] >= 1
+    assert diagnostics["drift_samples"] >= 1
     assert diagnostics["debug"]["b_hat"] > 0.0
 
 
@@ -2151,15 +2206,15 @@ def test_warm_start_restores_estimator_history_and_keeps_adaptive_gains() -> Non
     )
 
     diagnostics = restored.get_diagnostics()
-    assert diagnostics["heating_samples"] == len(a_samples)
-    assert diagnostics["cooling_samples"] == len(b_samples)
+    assert diagnostics["control_samples"] == len(a_samples)
+    assert diagnostics["drift_samples"] == len(b_samples)
     assert diagnostics["sample_window_size"] == 12
     assert diagnostics["debug"]["sample_window_size"] == 12
-    assert diagnostics["heating_rate_confidence"] == pytest.approx(algo._state.c_a)
-    assert diagnostics["cooling_rate_confidence"] == pytest.approx(algo._state.c_b)
-    assert diagnostics["heating_rate_converged"] is True
-    assert diagnostics["cooling_rate_converged"] is True
-    assert diagnostics["debug"]["heating_rate_converged"] is True
+    assert diagnostics["control_rate_confidence"] == pytest.approx(algo._state.c_a)
+    assert diagnostics["drift_rate_confidence"] == pytest.approx(algo._state.c_b)
+    assert diagnostics["control_rate_converged"] is True
+    assert diagnostics["drift_rate_converged"] is True
+    assert diagnostics["debug"]["control_rate_converged"] is True
     assert diagnostics["gain_indoor"] != pytest.approx(0.6)
     assert diagnostics["gain_outdoor"] != pytest.approx(0.01)
 
