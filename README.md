@@ -1,5 +1,7 @@
 # vtherm_adaptive_tpi
 
+**Language:** [Français](README-fr.md) | English
+
 Adaptive TPI plugin for [Versatile Thermostat](https://github.com/jmcollin78/versatile_thermostat), built on top of `vtherm_api`.
 
 ## What It Does
