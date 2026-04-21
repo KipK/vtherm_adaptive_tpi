@@ -762,3 +762,21 @@ class AdaptiveTPIAlgorithm:
         self._state.startup_bootstrap_lower_target_temp = snapshot.lower_target_temp
         self._state.startup_bootstrap_command_on_percent = snapshot.command_on_percent
         self._state.startup_bootstrap_completion_reason = snapshot.completion_reason
+
+    def should_force_bootstrap_cycle_restart(
+        self,
+        *,
+        target_temp: float | None,
+        current_temp: float | None,
+        hvac_mode,
+    ) -> bool:
+        """Return True when bootstrap threshold crossing should force a new cycle."""
+        heating_enabled = hvac_mode is not None and not str(hvac_mode).lower().endswith(
+            ("off", "sleep")
+        )
+        return self._startup_bootstrap.should_force_cycle_restart(
+            target_temp=target_temp,
+            current_temp=current_temp,
+            deadtime_identification_count=self._state.deadtime_identification_count,
+            heating_enabled=heating_enabled,
+        )

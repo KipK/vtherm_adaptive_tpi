@@ -120,6 +120,7 @@ Important design points:
   - if already at or above setpoint, stay OFF until `target - 0.3°C`
   - if below setpoint, first heat to setpoint, then cool to `target - 0.3°C`
   - from `target - 0.3°C`, heat at `100%` until setpoint
+  - each bootstrap threshold crossing forces an immediate cycle restart so the scheduler does not wait for the previous cycle boundary
   - if no deadtime identification is produced, retry once, then fall back to normal regulation
   - the forced OFF cooldown may also feed the initial `b` learning path even when it starts very close to setpoint
 - OFF and ON windows are handled separately

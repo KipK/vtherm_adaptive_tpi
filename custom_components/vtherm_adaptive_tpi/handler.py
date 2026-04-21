@@ -165,6 +165,21 @@ class AdaptiveTPIHandler:
 
     async def on_state_changed(self) -> None:
         """React to a thermostat state change."""
+        t = self._thermostat
+        if (
+            t.prop_algorithm is None
+            or not hasattr(t.prop_algorithm, "should_force_bootstrap_cycle_restart")
+            or t.cycle_scheduler is None
+            or not getattr(t.cycle_scheduler, "is_cycle_running", False)
+        ):
+            return
+
+        if t.prop_algorithm.should_force_bootstrap_cycle_restart(
+            target_temp=t.target_temperature,
+            current_temp=t.current_temperature,
+            hvac_mode=t.vtherm_hvac_mode,
+        ):
+            await t.async_control_heating(force=True)
 
     def on_scheduler_ready(self, scheduler) -> None:
         """Bind the handler to the cycle scheduler."""

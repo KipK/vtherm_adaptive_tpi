@@ -158,6 +158,7 @@ command and use the startup bootstrap sequence instead:
 - if `current_temp < target_temp`, command `100%` until `target_temp`
 - once the room reached `target_temp`, command `0%` until `target_temp - 0.3°C`
 - from `target_temp - 0.3°C`, command `100%` until `target_temp`
+- every bootstrap threshold crossing forces an immediate scheduler restart so the current cycle can end without waiting for its nominal boundary
 - if no deadtime identification was produced, repeat one more OFF->ON cycle
 - after the second failed attempt, return to nominal regulation
 - the OFF cooldown cycles created by this sequence may also feed the first `b` updates, even when they start near setpoint

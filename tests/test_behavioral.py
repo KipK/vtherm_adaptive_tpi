@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -11,6 +13,7 @@ from custom_components.vtherm_adaptive_tpi.adaptive_tpi.controller import (
     compute_gain_targets,
     project_gains,
 )
+from custom_components.vtherm_adaptive_tpi.handler import AdaptiveTPIHandler
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.deadtime import (
     CONFIDENCE_LOCK_THRESHOLD,
     N_MAX_RISE_CYCLES,
@@ -315,6 +318,115 @@ def test_startup_bootstrap_abandons_after_second_failed_deadtime_cycle() -> None
         == "deadtime_not_identified_after_retries"
     )
     assert algo.on_percent == pytest.approx(0.0)
+
+
+def test_startup_bootstrap_forces_cycle_restart_once_when_cooldown_reaches_lower_target() -> None:
+    """Bootstrap cooldown should request a single forced cycle restart at the lower threshold."""
+    algo = AdaptiveTPIAlgorithm(name="test-startup-bootstrap-force-cooldown")
+
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=20.0,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+
+    assert (
+        algo.should_force_bootstrap_cycle_restart(
+            target_temp=20.0,
+            current_temp=19.8,
+            hvac_mode="heat",
+        )
+        is False
+    )
+    assert (
+        algo.should_force_bootstrap_cycle_restart(
+            target_temp=20.0,
+            current_temp=19.7,
+            hvac_mode="heat",
+        )
+        is True
+    )
+    assert (
+        algo.should_force_bootstrap_cycle_restart(
+            target_temp=20.0,
+            current_temp=19.6,
+            hvac_mode="heat",
+        )
+        is False
+    )
+
+
+def test_startup_bootstrap_forces_cycle_restart_once_when_reheat_reaches_target() -> None:
+    """Bootstrap reheat should request a single forced cycle restart at setpoint."""
+    algo = AdaptiveTPIAlgorithm(name="test-startup-bootstrap-force-reheat")
+
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=20.0,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=19.7,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+
+    assert (
+        algo.should_force_bootstrap_cycle_restart(
+            target_temp=20.0,
+            current_temp=19.9,
+            hvac_mode="heat",
+        )
+        is False
+    )
+    assert (
+        algo.should_force_bootstrap_cycle_restart(
+            target_temp=20.0,
+            current_temp=20.0,
+            hvac_mode="heat",
+        )
+        is True
+    )
+    assert (
+        algo.should_force_bootstrap_cycle_restart(
+            target_temp=20.0,
+            current_temp=20.2,
+            hvac_mode="heat",
+        )
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_handler_forces_bootstrap_cycle_restart_on_state_change() -> None:
+    """State changes should trigger an immediate forced control pass when bootstrap hits a limit."""
+    thermostat = SimpleNamespace(
+        prop_algorithm=SimpleNamespace(
+            should_force_bootstrap_cycle_restart=MagicMock(return_value=True)
+        ),
+        cycle_scheduler=SimpleNamespace(is_cycle_running=True),
+        target_temperature=20.0,
+        current_temperature=19.7,
+        vtherm_hvac_mode="heat",
+        async_control_heating=AsyncMock(),
+    )
+    handler = object.__new__(AdaptiveTPIHandler)
+    handler._thermostat = thermostat
+
+    await handler.on_state_changed()
+
+    thermostat.prop_algorithm.should_force_bootstrap_cycle_restart.assert_called_once_with(
+        target_temp=20.0,
+        current_temp=19.7,
+        hvac_mode="heat",
+    )
+    thermostat.async_control_heating.assert_awaited_once_with(force=True)
 
 
 def test_diagnostics_expose_normalized_units_when_cycle_duration_is_known() -> None:

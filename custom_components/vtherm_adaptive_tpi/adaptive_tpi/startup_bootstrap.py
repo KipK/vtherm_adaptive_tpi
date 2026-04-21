@@ -53,6 +53,8 @@ class StartupBootstrapController:
         self._stage = STARTUP_BOOTSTRAP_IDLE
         self._attempt = 0
         self._completion_reason: str | None = None
+        self._force_requested_for_stage = False
+        self._force_stage_context = STARTUP_BOOTSTRAP_IDLE
 
     def evaluate(
         self,
@@ -82,6 +84,7 @@ class StartupBootstrapController:
         ):
             self._stage = STARTUP_BOOTSTRAP_COMPLETED
             self._completion_reason = "deadtime_identified"
+            self._sync_force_state()
             return self._snapshot(
                 target_temp=target_temp,
                 lower_target_temp=lower_target_temp,
@@ -102,11 +105,13 @@ class StartupBootstrapController:
                 self._stage = STARTUP_BOOTSTRAP_PREHEAT
                 self._attempt = 0
             self._completion_reason = None
+            self._sync_force_state()
 
         if self._stage == STARTUP_BOOTSTRAP_PREHEAT:
             if current_temp >= target_temp:
                 self._stage = STARTUP_BOOTSTRAP_COOLDOWN
                 self._attempt = max(self._attempt, 1)
+                self._sync_force_state()
                 return self._snapshot(
                     target_temp=target_temp,
                     lower_target_temp=lower_target_temp,
@@ -122,6 +127,7 @@ class StartupBootstrapController:
             if current_temp <= lower_target_temp:
                 self._stage = STARTUP_BOOTSTRAP_REHEAT
                 self._attempt = max(self._attempt, 1)
+                self._sync_force_state()
                 return self._snapshot(
                     target_temp=target_temp,
                     lower_target_temp=lower_target_temp,
@@ -138,6 +144,7 @@ class StartupBootstrapController:
                 if deadtime_identification_count > 0:
                     self._stage = STARTUP_BOOTSTRAP_COMPLETED
                     self._completion_reason = "deadtime_identified"
+                    self._sync_force_state()
                     return self._snapshot(
                         target_temp=target_temp,
                         lower_target_temp=lower_target_temp,
@@ -146,6 +153,7 @@ class StartupBootstrapController:
                 if self._attempt < self._max_attempts:
                     self._attempt += 1
                     self._stage = STARTUP_BOOTSTRAP_COOLDOWN
+                    self._sync_force_state()
                     return self._snapshot(
                         target_temp=target_temp,
                         lower_target_temp=lower_target_temp,
@@ -153,6 +161,7 @@ class StartupBootstrapController:
                     )
                 self._stage = STARTUP_BOOTSTRAP_ABANDONED
                 self._completion_reason = "deadtime_not_identified_after_retries"
+                self._sync_force_state()
                 return self._snapshot(
                     target_temp=target_temp,
                     lower_target_temp=lower_target_temp,
@@ -169,6 +178,37 @@ class StartupBootstrapController:
             lower_target_temp=lower_target_temp,
             command_on_percent=None,
         )
+
+    def should_force_cycle_restart(
+        self,
+        *,
+        target_temp: float | None,
+        current_temp: float | None,
+        deadtime_identification_count: int,
+        heating_enabled: bool,
+    ) -> bool:
+        """Return True when the current bootstrap stage should end immediately."""
+        self._sync_force_state()
+        if self._force_requested_for_stage:
+            return False
+        if target_temp is None or current_temp is None or not heating_enabled:
+            return False
+
+        lower_target_temp = target_temp - self._lower_delta_c
+        if (
+            deadtime_identification_count > 0
+            and self._stage in STARTUP_BOOTSTRAP_ACTIVE_STAGES
+        ):
+            self._force_requested_for_stage = True
+            return True
+        if self._stage in (STARTUP_BOOTSTRAP_PREHEAT, STARTUP_BOOTSTRAP_REHEAT):
+            if current_temp >= target_temp:
+                self._force_requested_for_stage = True
+                return True
+        if self._stage == STARTUP_BOOTSTRAP_COOLDOWN and current_temp <= lower_target_temp:
+            self._force_requested_for_stage = True
+            return True
+        return False
 
     def _snapshot(
         self,
@@ -188,3 +228,10 @@ class StartupBootstrapController:
             command_on_percent=command_on_percent,
             completion_reason=self._completion_reason,
         )
+
+    def _sync_force_state(self) -> None:
+        """Reset one-shot force gating when the bootstrap stage changes."""
+        if self._force_stage_context == self._stage:
+            return
+        self._force_stage_context = self._stage
+        self._force_requested_for_stage = False
