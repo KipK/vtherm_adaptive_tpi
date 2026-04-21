@@ -429,6 +429,37 @@ async def test_handler_forces_bootstrap_cycle_restart_on_state_change() -> None:
     thermostat.async_control_heating.assert_awaited_once_with(force=True)
 
 
+@pytest.mark.asyncio
+async def test_handler_refreshes_diagnostics_after_forced_control_pass() -> None:
+    """Forced control passes should publish refreshed diagnostics immediately."""
+    thermostat = SimpleNamespace(
+        target_temperature=22.0,
+        current_temperature=22.4,
+        current_outdoor_temperature=15.8,
+        last_temperature_slope=3.5,
+        vtherm_hvac_mode="heat",
+        is_overpowering_detected=False,
+        hvac_off_reason=None,
+        cycle_min=4,
+        prop_algorithm=SimpleNamespace(
+            calculate=MagicMock(),
+            get_diagnostics=MagicMock(return_value={"startup_bootstrap_stage": "completed"}),
+        ),
+        cycle_scheduler=SimpleNamespace(start_cycle=AsyncMock()),
+        on_percent=0.0,
+    )
+    handler = object.__new__(AdaptiveTPIHandler)
+    handler._thermostat = thermostat
+    handler._published_diagnostics = {"startup_bootstrap_stage": "cooldown_below_target"}
+    handler._should_publish_intermediate = False
+
+    await handler.control_heating(force=True)
+
+    thermostat.prop_algorithm.calculate.assert_called_once()
+    thermostat.cycle_scheduler.start_cycle.assert_awaited_once_with("heat", 0.0, True)
+    assert handler._published_diagnostics == {"startup_bootstrap_stage": "completed"}
+
+
 def test_diagnostics_expose_normalized_units_when_cycle_duration_is_known() -> None:
     """Diagnostics should expose user-facing normalized units in addition to per-cycle values."""
     algo = AdaptiveTPIAlgorithm(name="test-diag-units")

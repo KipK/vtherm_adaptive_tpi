@@ -129,6 +129,10 @@ class AdaptiveTPIHandler:
             )
 
         if t.vtherm_hvac_mode is not None and str(t.vtherm_hvac_mode).lower().endswith("off"):
+            if force:
+                # Forced passes may be published immediately by VT, so diagnostics
+                # must reflect the latest algorithm state before returning.
+                self._refresh_published_diagnostics()
             t._on_time_sec = 0
             t._off_time_sec = int(t.cycle_min * 60)
             if t.is_device_active:
@@ -151,6 +155,8 @@ class AdaptiveTPIHandler:
         if on_percent is None:
             if hasattr(t.prop_algorithm, "reject_cycle"):
                 t.prop_algorithm.reject_cycle("missing_temperature")
+            if force:
+                self._refresh_published_diagnostics()
             _LOGGER.info(
                 "%s - on_percent is None (temperature unavailable). Skipping cycle.",
                 t,
@@ -162,6 +168,8 @@ class AdaptiveTPIHandler:
             on_percent,
             force,
         )
+        if force:
+            self._refresh_published_diagnostics()
 
     async def on_state_changed(self) -> None:
         """React to a thermostat state change."""
