@@ -172,6 +172,7 @@ class AdaptiveTPIAlgorithm:
         if target_temp is None or current_temp is None or ext_current_temp is None:
             self._pending_cycle_sample = None
             return
+        self._temperature_available = True
 
         self._pending_cycle_sample = CycleSample(
             target_temp=target_temp,

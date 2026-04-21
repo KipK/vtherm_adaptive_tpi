@@ -50,7 +50,6 @@ Interprétation :
 - `heating_rate_per_hour`
 - `cooling_rate_per_hour`
 - `thermal_time_constant_hours`
-- `thermal_time_constant_minutes`
 - `heating_rate_confidence`
 - `cooling_rate_confidence`
 - `cooling_rate_converged`
@@ -59,7 +58,7 @@ Interprétation :
 
 - `heating_rate_per_hour` est l'autorité de chauffage apprise normalisée en `°C/heure`
 - `cooling_rate_per_hour` est le taux de perte de refroidissement appris normalisé en `1/heure`
-- `thermal_time_constant_hours` et `thermal_time_constant_minutes` sont dérivés du taux de refroidissement
+- `thermal_time_constant_hours` est dérivé du taux de refroidissement
 - `cooling_rate_converged` indique si l'estimation du refroidissement est stable enough pour ouvrir l'apprentissage du chauffage
 
 ### Compteurs d'échantillons
@@ -94,8 +93,6 @@ Valeurs possibles de `startup_sequence_stage` :
 Interprétation :
 
 - `startup_sequence_active = true` signifie que le bootstrap de démarrage remplace actuellement la commande nominale
-- `startup_sequence_cooling_temperature` est le seuil de refroidissement temporaire, égal à `target - 0.3°C`
-- `startup_sequence_requested_power` est la puissance actuellement demandée par la séquence de démarrage
 - `current_cycle_percent` est la puissance engagée pour le cycle actuellement en cours
 - `next_cycle_percent` est la puissance demandée préparée pour le prochain cycle de l'ordonnanceur
 

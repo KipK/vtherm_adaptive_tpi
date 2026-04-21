@@ -51,7 +51,6 @@ Interpretation:
 - `heating_rate_per_hour`
 - `cooling_rate_per_hour`
 - `thermal_time_constant_hours`
-- `thermal_time_constant_minutes`
 - `heating_rate_confidence`
 - `cooling_rate_confidence`
 - `cooling_rate_converged`
@@ -60,7 +59,7 @@ Interpretation:
 
 - `heating_rate_per_hour` is the learned heating authority normalized in `°C/hour`
 - `cooling_rate_per_hour` is the learned cooling loss rate normalized in `1/hour`
-- `thermal_time_constant_hours` and `thermal_time_constant_minutes` are derived from the cooling rate
+- `thermal_time_constant_hours` is derived from the cooling rate
 - `cooling_rate_converged` indicates whether cooling estimation is stable enough to open heating learning
 
 ### Sample counters
@@ -95,8 +94,6 @@ Possible `startup_sequence_stage` values:
 Interpretation:
 
 - `startup_sequence_active = true` means startup bootstrap is currently overriding the nominal command
-- `startup_sequence_cooling_temperature` is the temporary cooldown threshold, equal to `target - 0.3°C`
-- `startup_sequence_requested_power` is the power currently requested by the startup sequence
 - `current_cycle_percent` is the power committed for the currently engaged cycle
 - `next_cycle_percent` is the requested power prepared for the next scheduler cycle
 

@@ -106,7 +106,6 @@ def test_startup_with_no_history_keeps_bootstrap_defaults() -> None:
     assert diagnostics["heating_rate_per_hour"] is None
     assert diagnostics["cooling_rate_per_hour"] is None
     assert diagnostics["thermal_time_constant_hours"] is None
-    assert diagnostics["thermal_time_constant_minutes"] is None
 
 
 def test_startup_bootstrap_cools_down_immediately_when_temperature_is_at_setpoint() -> None:
@@ -127,8 +126,6 @@ def test_startup_bootstrap_cools_down_immediately_when_temperature_is_at_setpoin
     assert diagnostics["startup_sequence_active"] is True
     assert diagnostics["startup_sequence_stage"] == "cooling_below_target"
     assert diagnostics["startup_sequence_attempt"] == 1
-    assert diagnostics["startup_sequence_cooling_temperature"] == pytest.approx(19.7)
-    assert diagnostics["startup_sequence_requested_power"] == pytest.approx(0.0)
 
 
 def test_startup_bootstrap_retries_a_second_deadtime_cycle_when_first_one_fails() -> None:
@@ -474,7 +471,6 @@ def test_diagnostics_expose_normalized_units_when_cycle_duration_is_known() -> N
     assert diagnostics["heating_rate_per_hour"] == pytest.approx(2.4)
     assert diagnostics["cooling_rate_per_hour"] == pytest.approx(0.36)
     assert diagnostics["thermal_time_constant_hours"] == pytest.approx(1.0 / 0.36)
-    assert diagnostics["thermal_time_constant_minutes"] == pytest.approx((1.0 / 0.36) * 60.0)
 
 
 def test_diagnostics_publish_measured_deadtime_minutes_when_available() -> None:
