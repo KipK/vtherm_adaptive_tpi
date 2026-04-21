@@ -415,7 +415,7 @@ async def test_handler_forces_bootstrap_cycle_restart_on_state_change() -> None:
     handler = object.__new__(AdaptiveTPIHandler)
     handler._thermostat = thermostat
 
-    await handler.on_state_changed()
+    await handler.on_state_changed(True)
 
     thermostat.prop_algorithm.should_force_bootstrap_cycle_restart.assert_called_once_with(
         target_temp=20.0,

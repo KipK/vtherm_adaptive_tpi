@@ -171,8 +171,9 @@ class AdaptiveTPIHandler:
         if force:
             self._refresh_published_diagnostics()
 
-    async def on_state_changed(self) -> None:
+    async def on_state_changed(self, changed: bool) -> None:
         """React to a thermostat state change."""
+        del changed
         t = self._thermostat
         if (
             t.prop_algorithm is None
