@@ -20,6 +20,14 @@ The plugin stays in the TPI family:
 - Versatile Thermostat still applies that command through its normal cycle scheduler
 - learning happens only from completed real cycles
 
+TPI is a regulation algorithm built around a proportional loop
+through `gain_indoor` plus a feed-forward term through `gain_outdoor` to
+compensate thermal losses. There is no integral correction term used to cancel
+steady-state errors, so the `I` in `TPI` can be misleading.
+
+If you need a more advanced proportional-integral controller with feed-forward,
+see [vtherm-smartpi](https://github.com/KipK/vtherm_smartpi/).
+
 The integration includes:
 
 - Home Assistant integration scaffolding
