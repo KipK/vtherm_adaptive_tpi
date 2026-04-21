@@ -41,6 +41,13 @@ def _deadtime_min(nd_hat: float, cycle_min: float | None) -> float | None:
     return nd_hat * cycle_min
 
 
+def _published_deadtime_minutes(state: AdaptiveTPIState) -> float | None:
+    """Return the measured deadtime in minutes when available."""
+    if state.deadtime_minutes is not None:
+        return state.deadtime_minutes
+    return _deadtime_min(state.nd_hat, state.cycle_min_at_last_accepted_cycle)
+
+
 def _tau_h(b_per_hour: float | None) -> float | None:
     """Return the thermal time constant in hours when the loss rate is positive."""
     if b_per_hour is None or b_per_hour <= 0:
@@ -80,12 +87,11 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
         "gain_indoor": state.k_int,
         "gain_outdoor": state.k_ext,
         "deadtime_cycles": state.nd_hat,
-        "deadtime_minutes": _deadtime_min(state.nd_hat, cycle_min),
+        "deadtime_minutes": _published_deadtime_minutes(state),
         "deadtime_confidence": state.c_nd,
         "heating_rate_per_hour": a_per_hour,
         "cooling_rate_per_hour": b_per_hour,
         "thermal_time_constant_hours": tau_h,
-        "thermal_time_constant_minutes": (tau_h * 60.0) if tau_h is not None else None,
         "heating_rate_confidence": state.c_a,
         "cooling_rate_confidence": state.c_b,
         "cooling_rate_converged": state.b_converged,
@@ -98,9 +104,6 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
         ),
         "startup_sequence_attempt": state.startup_bootstrap_attempt,
         "startup_sequence_max_attempts": state.startup_bootstrap_max_attempts,
-        "startup_sequence_target_temperature": state.startup_bootstrap_target_temp,
-        "startup_sequence_cooling_temperature": state.startup_bootstrap_lower_target_temp,
-        "startup_sequence_requested_power": state.startup_bootstrap_command_on_percent,
         "startup_sequence_completion_reason": state.startup_bootstrap_completion_reason,
         "last_learning_result": state.last_learning_attempt_reason,
         "last_learning_family": _public_learning_family_name(
@@ -116,7 +119,7 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
             "k_ext": state.k_ext,
             "nd_hat": state.nd_hat,
             "nd_hat_cycles": state.nd_hat,
-            "deadtime_min": _deadtime_min(state.nd_hat, cycle_min),
+            "deadtime_min": _published_deadtime_minutes(state),
             "c_nd": state.c_nd,
             "a_hat": state.a_hat,
             "a_hat_per_hour": a_per_hour,
@@ -148,6 +151,8 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
             "startup_bootstrap_lower_target_temp": state.startup_bootstrap_lower_target_temp,
             "startup_bootstrap_command_on_percent": state.startup_bootstrap_command_on_percent,
             "startup_bootstrap_completion_reason": state.startup_bootstrap_completion_reason,
+            "startup_sequence_target_temperature": state.startup_bootstrap_target_temp,
+            "startup_sequence_cooling_temperature": state.startup_bootstrap_lower_target_temp,
             "a_dispersion": state.a_dispersion,
             "b_dispersion": state.b_dispersion,
             "deadtime_identification_count": state.deadtime_identification_count,

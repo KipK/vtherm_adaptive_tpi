@@ -292,6 +292,7 @@ class AdaptiveTPIAlgorithm:
             bootstrap_b_learning_allowed=pending_cycle.bootstrap_b_learning_allowed,
         )
         self._state.nd_hat = deadtime_result.nd_hat
+        self._state.deadtime_minutes = deadtime_result.nd_minutes
         self._state.c_nd = deadtime_result.c_nd
         self._state.deadtime_locked = deadtime_result.locked
         self._state.deadtime_best_candidate = deadtime_result.best_candidate
@@ -484,6 +485,7 @@ class AdaptiveTPIAlgorithm:
             else:
                 self._deadtime_model.reset()
                 self._state.nd_hat = 0.0
+                self._state.deadtime_minutes = None
                 self._state.c_nd = 0.0
                 self._state.deadtime_locked = False
                 self._state.deadtime_best_candidate = None
@@ -505,6 +507,7 @@ class AdaptiveTPIAlgorithm:
             if should_restore_deadtime:
                 deadtime_result = self._deadtime_model.last_result
                 self._state.nd_hat = deadtime_result.nd_hat
+                self._state.deadtime_minutes = deadtime_result.nd_minutes
                 self._state.c_nd = deadtime_result.c_nd
                 self._state.deadtime_locked = deadtime_result.locked
                 self._state.deadtime_best_candidate = deadtime_result.best_candidate

@@ -41,7 +41,8 @@ Ce sont les gains projetés actuellement utilisés par le contrôleur.
 Interprétation :
 
 - `deadtime_cycles` est l'estimation actuelle du temps mort en cycles de l'ordonnanceur
-- `deadtime_minutes` est la même valeur normalisée avec la dernière durée de cycle acceptée
+- `deadtime_minutes` est l'estimation mesurée du temps mort en minutes avant conversion en cycles
+- si aucune valeur mesurée en minutes n'est encore disponible, `deadtime_minutes` revient à la valeur normalisée construite depuis `deadtime_cycles` et la dernière durée de cycle acceptée
 - `deadtime_confidence` est la confiance dans cette estimation, dans `[0, 1]`
 
 ### Taux de chauffage et de refroidissement
@@ -79,9 +80,6 @@ Interprétation :
 - `startup_sequence_stage`
 - `startup_sequence_attempt`
 - `startup_sequence_max_attempts`
-- `startup_sequence_target_temperature`
-- `startup_sequence_cooling_temperature`
-- `startup_sequence_requested_power`
 - `startup_sequence_completion_reason`
 
 Valeurs possibles de `startup_sequence_stage` :
@@ -145,6 +143,7 @@ Ce mappage conserve les noms orientés implémentation utilisés par l'algorithm
   - `nd_hat`
   - `nd_hat_cycles`
   - `deadtime_min`
+- `deadtime_min` suit la même règle "minutes mesurées d'abord" que `deadtime_minutes`
   - `c_nd`
   - `deadtime_identification_count`
   - `deadtime_identification_qualities`

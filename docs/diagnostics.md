@@ -42,7 +42,8 @@ These are the projected gains currently used by the controller.
 Interpretation:
 
 - `deadtime_cycles` is the current deadtime estimate in scheduler cycles
-- `deadtime_minutes` is the same value normalized with the last accepted cycle duration
+- `deadtime_minutes` is the measured deadtime estimate in minutes before conversion to cycles
+- when no measured minute value is available yet, `deadtime_minutes` falls back to the normalized value built from `deadtime_cycles` and the last accepted cycle duration
 - `deadtime_confidence` is the confidence in that estimate, in `[0, 1]`
 
 ### Heating and cooling rates
@@ -80,9 +81,6 @@ Interpretation:
 - `startup_sequence_stage`
 - `startup_sequence_attempt`
 - `startup_sequence_max_attempts`
-- `startup_sequence_target_temperature`
-- `startup_sequence_cooling_temperature`
-- `startup_sequence_requested_power`
 - `startup_sequence_completion_reason`
 
 Possible `startup_sequence_stage` values:
@@ -147,6 +145,7 @@ This mapping keeps the implementation-oriented names used by the algorithm.
   - `nd_hat`
   - `nd_hat_cycles`
   - `deadtime_min`
+- `deadtime_min` follows the same measured-minutes-first rule as `deadtime_minutes`
   - `c_nd`
   - `deadtime_identification_count`
   - `deadtime_identification_qualities`

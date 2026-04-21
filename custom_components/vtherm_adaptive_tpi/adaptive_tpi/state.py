@@ -66,6 +66,7 @@ class AdaptiveTPIState:
     k_int: float
     k_ext: float
     nd_hat: float = 0.0
+    deadtime_minutes: float | None = None
     a_hat: float = 0.0
     b_hat: float = 0.0
     c_nd: float = 0.0
@@ -129,6 +130,7 @@ class AdaptiveTPIState:
             "k_int": self.k_int,
             "k_ext": self.k_ext,
             "nd_hat": self.nd_hat,
+            "deadtime_minutes": self.deadtime_minutes,
             "a_hat": self.a_hat,
             "b_hat": self.b_hat,
             "c_nd": self.c_nd,
@@ -172,6 +174,7 @@ class AdaptiveTPIState:
             "k_int",
             "k_ext",
             "nd_hat",
+            "deadtime_minutes",
             "a_hat",
             "b_hat",
             "c_nd",

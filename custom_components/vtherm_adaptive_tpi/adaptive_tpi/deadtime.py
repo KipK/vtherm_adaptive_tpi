@@ -71,6 +71,7 @@ class StepIdentification:
     quality: float
     b_proxy: float | None
     cycle_index: int
+    nd_minutes: float | None = None
 
 
 @dataclass(slots=True)
@@ -78,6 +79,7 @@ class DeadtimeSearchResult:
     """Expose the deadtime identification outcome."""
 
     nd_hat: float
+    nd_minutes: float | None
     c_nd: float
     locked: bool
     best_candidate: float | None
@@ -170,8 +172,13 @@ def _measure_rise_delay(
             if ceiling_hit and not rise_detected:
                 quality *= 0.5
             b_proxy = _compute_b_proxy(observations, step_index)
+            nd_minutes = sum(
+                max(0.0, float(observations[step_index + j].cycle_duration_min))
+                for j in range(n_cycles)
+            )
             return StepIdentification(
                 nd_cycles=float(n_cycles),
+                nd_minutes=nd_minutes,
                 quality=quality,
                 b_proxy=b_proxy,
                 cycle_index=step_index,
@@ -210,10 +217,12 @@ class DeadtimeModel:
         self._last_processed_step_index: int = -1
         self._pending_step_index: int | None = None
         self.nd_hat: float = 0.0
+        self.nd_minutes: float | None = None
         self.confidence: float = 0.0
         self.locked: bool = False
         self.last_result: DeadtimeSearchResult = DeadtimeSearchResult(
             nd_hat=0.0,
+            nd_minutes=None,
             c_nd=0.0,
             locked=False,
             best_candidate=None,
@@ -255,10 +264,12 @@ class DeadtimeModel:
         self._last_processed_step_index = -1
         self._pending_step_index = None
         self.nd_hat = 0.0
+        self.nd_minutes = None
         self.confidence = 0.0
         self.locked = False
         self.last_result = DeadtimeSearchResult(
             nd_hat=0.0,
+            nd_minutes=None,
             c_nd=0.0,
             locked=False,
             best_candidate=None,
@@ -341,10 +352,12 @@ class DeadtimeModel:
         """Derive nd_hat, confidence and lock state from stored identifications."""
         if not self._identifications:
             self.nd_hat = 0.0
+            self.nd_minutes = None
             self.confidence = 0.0
             self.locked = False
             return DeadtimeSearchResult(
                 nd_hat=0.0,
+                nd_minutes=None,
                 c_nd=0.0,
                 locked=False,
                 best_candidate=None,
@@ -358,6 +371,19 @@ class DeadtimeModel:
         nd_values = [ident.nd_cycles for ident in self._identifications]
         qualities = [ident.quality for ident in self._identifications]
         nd_hat = _weighted_median(nd_values, qualities)
+        minute_pairs = [
+            (ident.nd_minutes, ident.quality)
+            for ident in self._identifications
+            if ident.nd_minutes is not None
+        ]
+        nd_minutes = (
+            _weighted_median(
+                [float(minutes) for minutes, _ in minute_pairs],
+                [weight for _, weight in minute_pairs],
+            )
+            if minute_pairs
+            else None
+        )
 
         if len(nd_values) >= 2:
             deviations = sorted(abs(nd - nd_hat) for nd in nd_values)
@@ -381,6 +407,7 @@ class DeadtimeModel:
 
         locked = lock_reason is None
         self.nd_hat = nd_hat
+        self.nd_minutes = nd_minutes
         self.confidence = confidence
         self.locked = locked
 
@@ -395,6 +422,7 @@ class DeadtimeModel:
 
         return DeadtimeSearchResult(
             nd_hat=nd_hat,
+            nd_minutes=nd_minutes,
             c_nd=confidence,
             locked=locked,
             best_candidate=best.nd_cycles,
@@ -425,6 +453,7 @@ class DeadtimeModel:
             "identifications": [
                 {
                     "nd_cycles": ident.nd_cycles,
+                    "nd_minutes": ident.nd_minutes,
                     "quality": ident.quality,
                     "b_proxy": ident.b_proxy,
                     "cycle_index": ident.cycle_index,
@@ -450,9 +479,15 @@ class DeadtimeModel:
                     continue
                 try:
                     b_raw = raw.get("b_proxy")
+                    nd_minutes_raw = raw.get("nd_minutes")
                     self._identifications.append(
                         StepIdentification(
                             nd_cycles=float(raw["nd_cycles"]),
+                            nd_minutes=(
+                                float(nd_minutes_raw)
+                                if nd_minutes_raw is not None
+                                else None
+                            ),
                             quality=float(raw["quality"]),
                             b_proxy=float(b_raw) if b_raw is not None else None,
                             cycle_index=int(raw.get("cycle_index", 0)),

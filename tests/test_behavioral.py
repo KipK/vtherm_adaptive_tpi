@@ -469,6 +469,19 @@ def test_diagnostics_expose_normalized_units_when_cycle_duration_is_known() -> N
     assert diagnostics["thermal_time_constant_minutes"] == pytest.approx((1.0 / 0.36) * 60.0)
 
 
+def test_diagnostics_publish_measured_deadtime_minutes_when_available() -> None:
+    """Measured deadtime minutes should take priority over a normalized conversion."""
+    algo = AdaptiveTPIAlgorithm(name="test-diag-deadtime-minutes", debug_mode=True)
+    algo._state.nd_hat = 2.0
+    algo._state.deadtime_minutes = 11.5
+    algo._state.cycle_min_at_last_accepted_cycle = 5.0
+
+    diagnostics = algo.get_diagnostics()
+
+    assert diagnostics["deadtime_minutes"] == pytest.approx(11.5)
+    assert diagnostics["debug"]["deadtime_min"] == pytest.approx(11.5)
+
+
 def test_invalid_temperature_data_rejects_cycle_and_disables_output() -> None:
     """Missing temperatures should reject the cycle and expose the freeze reason."""
     algo = AdaptiveTPIAlgorithm(name="test-invalid", debug_mode=True)
@@ -710,13 +723,18 @@ def test_deadtime_model_locks_after_consistent_identifications() -> None:
     for i in range(3):
         model._identifications.append(
             StepIdentification(
-                nd_cycles=2.0 + 0.05 * i, quality=0.85, b_proxy=0.03, cycle_index=i * 30
+                nd_cycles=2.0 + 0.05 * i,
+                nd_minutes=10.0 + 0.25 * i,
+                quality=0.85,
+                b_proxy=0.03,
+                cycle_index=i * 30,
             )
         )
     result = model._recompute_nd_hat()
     assert result.locked is True
     assert result.lock_reason is None
     assert result.nd_hat == pytest.approx(2.05, abs=0.1)
+    assert result.nd_minutes == pytest.approx(10.25, abs=0.1)
     assert result.c_nd >= CONFIDENCE_LOCK_THRESHOLD
     assert result.best_candidate_b == pytest.approx(0.03)
 
@@ -775,7 +793,13 @@ def test_deadtime_persistence_roundtrip() -> None:
     """Identifications must survive a serialise / deserialise cycle unchanged."""
     model = DeadtimeModel()
     model._identifications.append(
-        StepIdentification(nd_cycles=2.3, quality=0.75, b_proxy=0.04, cycle_index=10)
+        StepIdentification(
+            nd_cycles=2.3,
+            nd_minutes=11.7,
+            quality=0.75,
+            b_proxy=0.04,
+            cycle_index=10,
+        )
     )
     model._last_processed_step_index = 10
     model._recompute_nd_hat()
@@ -787,10 +811,12 @@ def test_deadtime_persistence_roundtrip() -> None:
 
     assert len(model2._identifications) == 1
     assert model2._identifications[0].nd_cycles == pytest.approx(2.3)
+    assert model2._identifications[0].nd_minutes == pytest.approx(11.7)
     assert model2._identifications[0].quality == pytest.approx(0.75)
     assert model2._identifications[0].b_proxy == pytest.approx(0.04)
     assert model2._last_processed_step_index == 10
     assert model2.nd_hat == pytest.approx(2.3)
+    assert model2.nd_minutes == pytest.approx(11.7)
 
 
 def test_deadtime_old_format_silently_ignored() -> None:
@@ -1610,6 +1636,7 @@ def test_completed_on_cycle_routes_to_a_not_b(monkeypatch: pytest.MonkeyPatch) -
         )
         return DeadtimeSearchResult(
             nd_hat=0.0,
+            nd_minutes=None,
             c_nd=1.0,
             locked=True,
             best_candidate=0.0,
@@ -1675,6 +1702,7 @@ def test_deadtime_history_keeps_committed_cycle_power(
         recorded_powers.append(observation.applied_power)
         return DeadtimeSearchResult(
             nd_hat=0.0,
+            nd_minutes=None,
             c_nd=0.0,
             locked=False,
             best_candidate=None,
@@ -1731,6 +1759,7 @@ def test_bootstrap_cooldown_off_cycle_can_update_b_near_setpoint(
         )
         return DeadtimeSearchResult(
             nd_hat=0.0,
+            nd_minutes=None,
             c_nd=0.0,
             locked=False,
             best_candidate=None,
