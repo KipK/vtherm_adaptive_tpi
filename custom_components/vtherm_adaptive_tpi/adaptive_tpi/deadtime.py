@@ -1,32 +1,31 @@
-"""Deadtime identification for Adaptive TPI using exponentially-weighted moments."""
+"""Deadtime identification for Adaptive TPI using time-to-first-rise."""
 
 from __future__ import annotations
 
-import math
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-CONFIDENCE_LOCK_THRESHOLD = 0.6
+CONFIDENCE_LOCK_THRESHOLD = 0.5
 
-# Step detection
-N_OFF_MIN = 2
-STEP_POWER_MIN = 0.70
-OFF_POWER_MAX = 0.15
-MAX_SETPOINT_JUMP = 0.3
+# Event detection
+OFF_POWER_MAX_NEW = 0.15
+STEP_POWER_MIN_NEW = 0.60
+STEP_ABORT_POWER_NEW = 0.40
+MAX_SETPOINT_JUMP = 0.30
 
-# Response collection
-STEP_ABORT_POWER = 0.50
-N_MAX_COLLECT = 20
-PLATEAU_WINDOW = 3
-PLATEAU_THRESHOLD = 0.02
-MIN_AMPLITUDE = 0.30
-TARGET_AMPLITUDE = 1.0
+# Rise detection
+RISE_EPSILON = 0.10
+RISE_EPSILON_STEP = 0.10
+N_MAX_RISE_CYCLES = 8
 
-# Confidence and locking
+# Quality
+OFF_POWER_CLEAN = 0.05
+
+# Aggregation
 N_HIST = 6
 N_LOCK_MIN = 3
-MAX_REL_SPREAD = 0.30
+SPREAD_MAX_CYCLES = 1.0
 
 # History management
 MAX_HISTORY_LEN = 100
@@ -112,21 +111,17 @@ def _find_latest_step(
 ) -> int | None:
     """Return the index of the latest unprocessed clean step or None."""
     n = len(observations)
-    for step_index in range(n - 1, N_OFF_MIN, -1):
+    for step_index in range(n - 1, 0, -1):
         if step_index <= last_processed_step_index:
             break
 
-        if observations[step_index].applied_power < STEP_POWER_MIN:
+        if observations[step_index].applied_power < STEP_POWER_MIN_NEW:
             continue
-        if observations[step_index - 1].applied_power > OFF_POWER_MAX:
-            continue
-
-        off_slice = observations[step_index - N_OFF_MIN : step_index]
-        if not all(e.applied_power <= OFF_POWER_MAX for e in off_slice):
+        if observations[step_index - 1].applied_power > OFF_POWER_MAX_NEW:
             continue
 
-        guard_start = max(0, step_index - N_OFF_MIN)
-        guard_end = min(n, step_index + 3)
+        guard_start = max(0, step_index - 1)
+        guard_end = min(n, step_index + 2)
         guard_slice = observations[guard_start:guard_end]
         if any(
             abs(guard_slice[k].target_temp - guard_slice[k - 1].target_temp)
@@ -140,94 +135,58 @@ def _find_latest_step(
     return None
 
 
-def _collect_response(
+def _measure_rise_delay(
     observations: tuple[CycleHistoryEntry, ...],
     step_index: int,
-) -> list[CycleHistoryEntry] | str:
-    """Collect step-response cycles starting at step_index.
+) -> StepIdentification | str:
+    """Measure delay from step edge to first visible temperature rise.
 
-    Returns the collected list when a plateau is detected,
-    _RESPONSE_PENDING while still accumulating, or _RESPONSE_ABORTED on failure.
+    Returns _RESPONSE_PENDING while no rise or abort has occurred yet,
+    _RESPONSE_ABORTED on power drop or setpoint jump before the rise,
+    or a StepIdentification when a rise (or ceiling) is detected.
     """
-    response: list[CycleHistoryEntry] = []
-    for i in range(step_index, len(observations)):
+    tin_at_step = observations[step_index].tin
+    n = len(observations)
+
+    for n_cycles in range(1, n - step_index):
+        i = step_index + n_cycles
         entry = observations[i]
 
-        if i > step_index and entry.applied_power < STEP_ABORT_POWER:
+        if entry.applied_power < STEP_ABORT_POWER_NEW:
             return _RESPONSE_ABORTED
 
-        response.append(entry)
-
-        if len(response) > N_MAX_COLLECT:
+        if abs(entry.target_temp - observations[i - 1].target_temp) > MAX_SETPOINT_JUMP:
             return _RESPONSE_ABORTED
 
-        if len(response) >= PLATEAU_WINDOW + 1:
-            last_dts = [
-                abs(response[j].tin - response[j - 1].tin)
-                for j in range(len(response) - PLATEAU_WINDOW, len(response))
+        cumulative_rise = entry.tin - tin_at_step
+        step_rise = entry.tin - observations[i - 1].tin
+
+        rise_detected = cumulative_rise >= RISE_EPSILON or step_rise >= RISE_EPSILON_STEP
+        ceiling_hit = n_cycles >= N_MAX_RISE_CYCLES
+
+        if rise_detected or ceiling_hit:
+            on_powers = [
+                observations[step_index + j].applied_power
+                for j in range(n_cycles + 1)
             ]
-            if all(dt < PLATEAU_THRESHOLD for dt in last_dts):
-                return response
+            q_power = min(1.0, sum(on_powers) / max(len(on_powers), 1))
+            q_edge = (
+                1.0
+                if observations[step_index - 1].applied_power <= OFF_POWER_CLEAN
+                else 0.7
+            )
+            quality = q_power * q_edge
+            if ceiling_hit and not rise_detected:
+                quality *= 0.5
+            b_proxy = _compute_b_proxy(observations, step_index)
+            return StepIdentification(
+                nd_cycles=float(n_cycles),
+                quality=quality,
+                b_proxy=b_proxy,
+                cycle_index=step_index,
+            )
 
     return _RESPONSE_PENDING
-
-
-def _compute_weighted_moments(
-    response: list[CycleHistoryEntry],
-) -> tuple[float, float] | None:
-    """Extract (nd_cycles, quality) from a collected step response.
-
-    Applies exponentially-weighted moments of the normalised step-response curve:
-        M0 = Σ w(k)·(1−y(k))·Δt,  M1 = Σ w(k)·t_k·(1−y(k))·Δt
-    then derives L = max(0, T_ar − T) where T_ar = M1/M0 and T = sqrt(M2/M0 − T_ar²).
-    Returns None when the response does not meet quality requirements.
-    """
-    if len(response) < 4:
-        return None
-
-    tin_0 = response[0].tin
-    tail_len = min(3, len(response))
-    tin_final_est = sum(e.tin for e in response[-tail_len:]) / tail_len
-    amplitude = tin_final_est - tin_0
-
-    if amplitude < MIN_AMPLITUDE:
-        return None
-
-    delta_ts = [e.cycle_duration_min * 60.0 for e in response]
-    mean_dt = sum(delta_ts) / len(delta_ts)
-
-    cumulative_times: list[float] = []
-    t = 0.0
-    for dt in delta_ts:
-        cumulative_times.append(t)
-        t += dt
-
-    alpha = 1.0 / max(t, 1.0)
-
-    m0 = m1 = m2 = 0.0
-    for entry, t_k, dt_k in zip(response, cumulative_times, delta_ts):
-        y_norm = (entry.tin - tin_0) / amplitude
-        complement = max(0.0, 1.0 - y_norm)
-        w = math.exp(-alpha * t_k)
-        m0 += w * complement * dt_k
-        m1 += w * t_k * complement * dt_k
-        m2 += w * t_k * t_k * complement * dt_k
-
-    if m0 < 1e-6:
-        return None
-
-    t_ar = m1 / m0
-    variance = m2 / m0 - t_ar * t_ar
-    time_const = math.sqrt(max(variance, 0.0))
-    l_seconds = max(0.0, t_ar - time_const)
-    nd_cycles = l_seconds / max(mean_dt, 1.0)
-
-    q_amplitude = min(1.0, amplitude / TARGET_AMPLITUDE)
-    n_on = sum(1 for e in response if e.applied_power >= STEP_POWER_MIN * 0.85)
-    q_power = n_on / len(response)
-    quality = q_amplitude * q_power
-
-    return nd_cycles, quality
 
 
 def _compute_b_proxy(
@@ -235,7 +194,7 @@ def _compute_b_proxy(
     step_index: int,
 ) -> float | None:
     """Estimate the thermal loss coefficient from the OFF period preceding the step."""
-    off_slice = observations[max(0, step_index - N_OFF_MIN) : step_index]
+    off_slice = observations[max(0, step_index - 3) : step_index]
     measurements: list[float] = []
     for k in range(len(off_slice) - 1):
         delta_tin = off_slice[k + 1].tin - off_slice[k].tin
@@ -245,13 +204,13 @@ def _compute_b_proxy(
         measurement = -delta_tin / delta_out
         if measurement > 0.0:
             measurements.append(measurement)
-    if not measurements:
+    if len(measurements) < 2:
         return None
     return sum(measurements) / len(measurements)
 
 
 class DeadtimeModel:
-    """Deadtime identifier using exponentially-weighted moments on step responses."""
+    """Deadtime identifier using time-to-first-rise on step responses."""
 
     def __init__(self) -> None:
         """Initialize the deadtime identifier."""
@@ -366,20 +325,9 @@ class DeadtimeModel:
         observations = tuple(self._cycle_history)
 
         if self._pending_step_index is not None:
-            result = _collect_response(observations, self._pending_step_index)
-            if isinstance(result, list):
-                moments = _compute_weighted_moments(result)
-                if moments is not None:
-                    nd_cycles, quality = moments
-                    b_proxy = _compute_b_proxy(observations, self._pending_step_index)
-                    self._identifications.append(
-                        StepIdentification(
-                            nd_cycles=nd_cycles,
-                            quality=quality,
-                            b_proxy=b_proxy,
-                            cycle_index=self._pending_step_index,
-                        )
-                    )
+            result = _measure_rise_delay(observations, self._pending_step_index)
+            if isinstance(result, StepIdentification):
+                self._identifications.append(result)
                 self._last_processed_step_index = self._pending_step_index
                 self._pending_step_index = None
             elif result == _RESPONSE_ABORTED:
@@ -421,20 +369,19 @@ class DeadtimeModel:
         if len(nd_values) >= 2:
             deviations = sorted(abs(nd - nd_hat) for nd in nd_values)
             spread = deviations[len(deviations) // 2]
-            rel_spread = spread / max(nd_hat, 0.1)
         else:
-            rel_spread = 1.0
+            spread = float("inf")
 
         n = len(nd_values)
         count_score = min(1.0, n / N_LOCK_MIN)
-        spread_score = max(0.0, 1.0 - rel_spread / MAX_REL_SPREAD)
+        spread_score = max(0.0, 1.0 - spread / SPREAD_MAX_CYCLES)
         quality_score = sum(qualities) / len(qualities)
         confidence = count_score * spread_score * quality_score
 
         lock_reason: str | None = None
         if n < N_LOCK_MIN:
             lock_reason = "deadtime_insufficient_identifications"
-        elif rel_spread >= MAX_REL_SPREAD:
+        elif spread > SPREAD_MAX_CYCLES:
             lock_reason = "deadtime_insufficient_separation"
         elif confidence < CONFIDENCE_LOCK_THRESHOLD:
             lock_reason = "deadtime_confidence_low"

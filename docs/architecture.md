@@ -53,12 +53,16 @@ Responsibilities:
 
 ### `adaptive_tpi/deadtime.py`
 
-Coarse deadtime estimator.
+Coarse deadtime estimator using a time-to-first-rise method.
 
 Responsibilities:
 
 - keep a temporally contiguous cycle history
-- score candidate deadtimes
+- detect rising power edges (OFF→ON transitions) and measure the delay
+  until the first visible temperature rise (`RISE_EPSILON` cumulative or
+  `RISE_EPSILON_STEP` per cycle)
+- aggregate identifications via weighted median over the last `N_HIST`
+  events and lock when spread (in cycles) and quality conditions are met
 - expose:
   - `nd_hat`
   - `c_nd`

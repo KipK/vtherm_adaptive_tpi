@@ -13,15 +13,15 @@ from custom_components.vtherm_adaptive_tpi.adaptive_tpi.controller import (
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.deadtime import (
     CONFIDENCE_LOCK_THRESHOLD,
+    N_MAX_RISE_CYCLES,
     CycleHistoryEntry,
     DeadtimeModel,
     DeadtimeObservation,
     DeadtimeSearchResult,
     StepIdentification,
     _compute_b_proxy,
-    _compute_weighted_moments,
-    _collect_response,
     _find_latest_step,
+    _measure_rise_delay,
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.estimator import (
     ASample,
@@ -95,7 +95,7 @@ def test_startup_with_no_history_keeps_bootstrap_defaults() -> None:
     assert diagnostics["bootstrap_phase"] == "startup"
     assert diagnostics["accepted_cycles_count"] == 0
     assert diagnostics["k_int"] == pytest.approx(0.6)
-    assert diagnostics["k_ext"] == pytest.approx(0.01)
+    assert diagnostics["k_ext"] == pytest.approx(0.02)
     assert diagnostics["deadtime_min"] is None
     assert diagnostics["a_hat_per_hour"] is None
     assert diagnostics["b_hat_per_hour"] is None
@@ -165,25 +165,24 @@ def test_step_detection_finds_clean_on_transition() -> None:
     assert step_index == 4
 
 
-def test_step_detection_ignores_insufficient_off_period() -> None:
-    """A step preceded by fewer than N_OFF_MIN OFF cycles must not be detected."""
-    observations = _make_step_observations(nd=2, n_off=2, n_on=1)
+def test_step_detection_ignores_no_off_period() -> None:
+    """A step with no preceding OFF cycle (previous power too high) must not be detected."""
+    observations = _make_step_observations(nd=2, n_off=0, n_on=10)
     step_index = _find_latest_step(observations, last_processed_step_index=-1)
     assert step_index is None
 
 
-def test_step_collection_ends_on_plateau() -> None:
-    """Collection must return the response list when a plateau is detected."""
+def test_rise_delay_detects_rise() -> None:
+    """_measure_rise_delay must return a StepIdentification when a rise is detected."""
     observations = _make_step_observations(nd=2, n_off=4)
-    result = _collect_response(observations, step_index=4)
-    assert isinstance(result, list)
-    assert len(result) >= 4
+    result = _measure_rise_delay(observations, step_index=4)
+    assert isinstance(result, StepIdentification)
+    assert result.nd_cycles >= 1.0
 
 
-def test_step_collection_aborts_on_power_cut() -> None:
-    """An early power cut during collection must abort the identification."""
+def test_rise_delay_aborts_on_power_cut() -> None:
+    """A power drop below STEP_ABORT_POWER_NEW during collection must abort."""
     base = list(_make_step_observations(nd=2, n_off=4, n_on=5))
-    # Force power drop at index 7 (3 cycles into ON phase)
     entry = base[7]
     base[7] = CycleHistoryEntry(
         tin=entry.tin,
@@ -195,21 +194,140 @@ def test_step_collection_aborts_on_power_cut() -> None:
         is_estimator_informative=True,
         cycle_duration_min=5.0,
     )
-    result = _collect_response(tuple(base), step_index=4)
+    result = _measure_rise_delay(tuple(base), step_index=4)
     assert result == "aborted"
 
 
-def test_weighted_moments_returns_finite_nd() -> None:
-    """A valid FOPDT step response must yield a positive finite nd estimate."""
+def test_rise_delay_identification_has_valid_quality() -> None:
+    """A valid step response must yield a positive finite quality from rise-delay."""
     observations = _make_step_observations(nd=2, n_off=4)
-    result = _collect_response(observations, step_index=4)
-    assert isinstance(result, list)
-    moments = _compute_weighted_moments(result)
-    assert moments is not None
-    nd_cycles, quality = moments
-    assert math.isfinite(nd_cycles)
-    assert nd_cycles >= 0.0
-    assert 0.0 < quality <= 1.0
+    result = _measure_rise_delay(observations, step_index=4)
+    assert isinstance(result, StepIdentification)
+    assert math.isfinite(result.nd_cycles)
+    assert result.nd_cycles >= 0.0
+    assert 0.0 < result.quality <= 1.0
+
+
+def test_rise_delay_single_off_cycle_accepted() -> None:
+    """A step preceded by a single OFF cycle must be detected and identified."""
+    observations = _make_step_observations(nd=1, n_off=1, n_on=12)
+    step_index = _find_latest_step(observations, last_processed_step_index=-1)
+    assert step_index == 1
+    result = _measure_rise_delay(observations, step_index=1)
+    assert isinstance(result, StepIdentification)
+
+
+def test_rise_delay_slow_responder_before_ceiling() -> None:
+    """A slow responder detected before the ceiling must have reduced quality."""
+    tin = 10.0
+    tout = 5.0
+    target = 20.0
+    entries: list[CycleHistoryEntry] = []
+    # 2 OFF cycles
+    for _ in range(2):
+        entries.append(
+            CycleHistoryEntry(
+                tin=tin,
+                tout=tout,
+                target_temp=target,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=True,
+            )
+        )
+    # 6 dead cycles (ON power, tin barely moves)
+    for k in range(6):
+        entries.append(
+            CycleHistoryEntry(
+                tin=tin + 0.01 * k,
+                tout=tout,
+                target_temp=target,
+                applied_power=0.8,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=True,
+            )
+        )
+    # Rise at cycle 7 (+0.15 °C from step)
+    entries.append(
+        CycleHistoryEntry(
+            tin=tin + 0.15,
+            tout=tout,
+            target_temp=target,
+            applied_power=0.8,
+            is_valid=True,
+            is_informative=True,
+            is_estimator_informative=True,
+        )
+    )
+    observations = tuple(entries)
+    step_index = _find_latest_step(observations, last_processed_step_index=-1)
+    assert step_index == 2
+    result = _measure_rise_delay(observations, step_index=2)
+    assert isinstance(result, StepIdentification)
+    assert result.nd_cycles == pytest.approx(6.0)
+    assert 0.0 < result.quality <= 1.0
+
+
+def test_rise_delay_ceiling_hit_returns_capped_nd_with_reduced_quality() -> None:
+    """When no rise is detected within N_MAX_RISE_CYCLES, nd is capped and quality halved."""
+    tin = 10.0
+    tout = 5.0
+    target = 20.0
+    entries: list[CycleHistoryEntry] = []
+    # 2 OFF cycles
+    for _ in range(2):
+        entries.append(
+            CycleHistoryEntry(
+                tin=tin,
+                tout=tout,
+                target_temp=target,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=True,
+            )
+        )
+    # N_MAX_RISE_CYCLES + 1 ON cycles with flat tin (no rise)
+    for _ in range(N_MAX_RISE_CYCLES + 1):
+        entries.append(
+            CycleHistoryEntry(
+                tin=tin,
+                tout=tout,
+                target_temp=target,
+                applied_power=0.8,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=True,
+            )
+        )
+    observations = tuple(entries)
+    result = _measure_rise_delay(observations, step_index=2)
+    assert isinstance(result, StepIdentification)
+    assert result.nd_cycles == pytest.approx(float(N_MAX_RISE_CYCLES))
+    # Quality must be reduced (halved) compared to a clean rise
+    assert result.quality < 0.5
+
+
+def test_rise_delay_aborts_on_setpoint_jump() -> None:
+    """A setpoint jump during collection must abort the identification."""
+    observations = _make_step_observations(nd=2, n_off=4, n_on=10)
+    base = list(observations)
+    # Inject a setpoint jump at index 7
+    entry = base[7]
+    base[7] = CycleHistoryEntry(
+        tin=entry.tin,
+        tout=entry.tout,
+        target_temp=entry.target_temp + 2.0,
+        applied_power=entry.applied_power,
+        is_valid=True,
+        is_informative=True,
+        is_estimator_informative=True,
+        cycle_duration_min=5.0,
+    )
+    result = _measure_rise_delay(tuple(base), step_index=4)
+    assert result == "aborted"
 
 
 def test_b_proxy_positive_from_off_period() -> None:
@@ -244,7 +362,9 @@ def test_deadtime_model_locks_after_consistent_identifications() -> None:
     model = DeadtimeModel()
     for i in range(3):
         model._identifications.append(
-            StepIdentification(nd_cycles=2.0 + 0.05 * i, quality=0.85, b_proxy=0.03, cycle_index=i * 30)
+            StepIdentification(
+                nd_cycles=2.0 + 0.05 * i, quality=0.85, b_proxy=0.03, cycle_index=i * 30
+            )
         )
     result = model._recompute_nd_hat()
     assert result.locked is True
@@ -275,7 +395,10 @@ def test_deadtime_model_no_lock_when_spread_too_high() -> None:
         )
     result = model._recompute_nd_hat()
     assert result.locked is False
-    assert result.lock_reason in ("deadtime_insufficient_separation", "deadtime_confidence_low")
+    assert result.lock_reason in (
+        "deadtime_insufficient_separation",
+        "deadtime_confidence_low",
+    )
 
 
 def test_deadtime_model_nd_hat_can_be_non_integer() -> None:
@@ -314,7 +437,9 @@ def test_deadtime_persistence_roundtrip() -> None:
 def test_deadtime_old_format_silently_ignored() -> None:
     """A persisted dict with the old cycle_history key must be silently discarded."""
     old_format = {
-        "cycle_history": [{"tin": 19.0, "tout": 10.0, "target_temp": 21.0, "applied_power": 0.7}],
+        "cycle_history": [
+            {"tin": 19.0, "tout": 10.0, "target_temp": 21.0, "applied_power": 0.7}
+        ],
         "best_candidate_history": [1, 1, 1],
     }
     model = DeadtimeModel()
@@ -379,7 +504,6 @@ def test_estimator_can_seed_b_from_deadtime_proxy() -> None:
     assert update.b_samples_count == 1
     assert update.b_last_reason == "b_seeded_from_deadtime"
     assert update.i_b == pytest.approx(0.0)
-
 
 
 def test_learning_window_can_extend_across_multiple_off_cycles() -> None:
@@ -625,7 +749,9 @@ def test_learning_window_allows_setpoint_jump_that_reinforces_on_regime() -> Non
     assert result.reason == "on_window_ready"
 
 
-def test_learning_window_waits_for_more_signal_after_truncating_setpoint_jump_window() -> None:
+def test_learning_window_waits_for_more_signal_after_truncating_setpoint_jump_window() -> (
+    None
+):
     """A truncated post-jump window should wait until enough safe signal is available."""
     result = build_learning_window(
         (
@@ -678,7 +804,9 @@ def test_learning_window_waits_for_more_signal_after_truncating_setpoint_jump_wi
     assert result.reason == "off_window_waiting_more_signal"
 
 
-def test_learning_window_allows_one_safe_cycle_after_setpoint_jump_without_deadtime() -> None:
+def test_learning_window_allows_one_safe_cycle_after_setpoint_jump_without_deadtime() -> (
+    None
+):
     """Without a known deadtime, one full safety cycle after the jump should be enough."""
     result = build_learning_window(
         (
@@ -791,7 +919,9 @@ def test_classify_cycle_regime_returns_mixed_for_mid_power() -> None:
     assert classify_cycle_regime(0.18) == WINDOW_REGIME_MIXED
 
 
-def test_learning_window_does_not_restart_blackout_on_mixed_gap_inside_same_regime() -> None:
+def test_learning_window_does_not_restart_blackout_on_mixed_gap_inside_same_regime() -> (
+    None
+):
     """A mixed cycle between two OFF cycles should not count as a fresh OFF transition."""
     result = build_anchored_learning_window(
         (
@@ -1120,7 +1250,9 @@ def test_completed_on_cycle_routes_to_a_not_b(monkeypatch: pytest.MonkeyPatch) -
     assert diagnostics["a_samples_count"] >= 1
 
 
-def test_deadtime_history_keeps_committed_cycle_power(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_deadtime_history_keeps_committed_cycle_power(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The deadtime history must keep the cycle-start power captured for that cycle."""
     algo = AdaptiveTPIAlgorithm(name="test-deadtime-cycle-power", debug_mode=True)
     recorded_powers: list[float] = []
@@ -1259,12 +1391,16 @@ def test_algo_exposes_deadtime_b_proxy_and_crosscheck_after_bootstrap_seed() -> 
 
     for i in range(3):
         algo._deadtime_model._identifications.append(
-            StepIdentification(nd_cycles=2.0 + 0.05 * i, quality=0.85, b_proxy=0.03, cycle_index=i * 30)
+            StepIdentification(
+                nd_cycles=2.0 + 0.05 * i, quality=0.85, b_proxy=0.03, cycle_index=i * 30
+            )
         )
 
     result = algo._deadtime_model.evaluate()
     algo._state.deadtime_b_proxy = result.best_candidate_b
-    algo._apply_estimator_update(algo._estimator.seed_b_from_deadtime_proxy(result.best_candidate_b))
+    algo._apply_estimator_update(
+        algo._estimator.seed_b_from_deadtime_proxy(result.best_candidate_b)
+    )
     algo._refresh_b_crosscheck()
 
     diagnostics = algo.get_diagnostics()
@@ -1339,7 +1475,7 @@ def test_reset_learning_restores_fresh_bootstrap_defaults() -> None:
     diagnostics = algo.get_diagnostics()
     assert diagnostics["bootstrap_phase"] == "startup"
     assert diagnostics["k_int"] == pytest.approx(0.6)
-    assert diagnostics["k_ext"] == pytest.approx(0.01)
+    assert diagnostics["k_ext"] == pytest.approx(0.02)
     assert diagnostics["nd_hat"] == pytest.approx(0.0)
     assert diagnostics["c_nd"] == pytest.approx(0.0)
     assert diagnostics["a_hat"] == pytest.approx(0.001)
@@ -1383,7 +1519,9 @@ def test_warm_start_restores_deadtime_model_and_candidate_costs() -> None:
 
     for i in range(3):
         algo._deadtime_model._identifications.append(
-            StepIdentification(nd_cycles=2.0 + 0.05 * i, quality=0.85, b_proxy=0.04, cycle_index=i * 30)
+            StepIdentification(
+                nd_cycles=2.0 + 0.05 * i, quality=0.85, b_proxy=0.04, cycle_index=i * 30
+            )
         )
     algo._deadtime_model.evaluate()
 
@@ -1403,7 +1541,9 @@ def test_warm_start_restores_deadtime_model_and_candidate_costs() -> None:
 
     saved = algo.save_state()
 
-    restored = AdaptiveTPIAlgorithm(name="test-deadtime-persistence-restore", debug_mode=True)
+    restored = AdaptiveTPIAlgorithm(
+        name="test-deadtime-persistence-restore", debug_mode=True
+    )
     restored.load_state(
         saved,
         current_cycle_min=5.0,
@@ -1415,7 +1555,9 @@ def test_warm_start_restores_deadtime_model_and_candidate_costs() -> None:
     assert diagnostics["c_nd"] == pytest.approx(result.c_nd)
     assert diagnostics["deadtime_identification_qualities"] == result.candidate_costs
     assert diagnostics["deadtime_b_proxy"] == pytest.approx(result.best_candidate_b)
-    assert diagnostics["debug"]["deadtime_best_candidate"] == pytest.approx(result.best_candidate)
+    assert diagnostics["debug"]["deadtime_best_candidate"] == pytest.approx(
+        result.best_candidate
+    )
 
 
 def test_warm_start_restores_estimator_history_and_keeps_adaptive_gains() -> None:
@@ -1450,7 +1592,9 @@ def test_warm_start_restores_estimator_history_and_keeps_adaptive_gains() -> Non
 
     saved = algo.save_state()
 
-    restored = AdaptiveTPIAlgorithm(name="test-estimator-persistence-restore", debug_mode=True)
+    restored = AdaptiveTPIAlgorithm(
+        name="test-estimator-persistence-restore", debug_mode=True
+    )
     restored.load_state(
         saved,
         current_cycle_min=5.0,
