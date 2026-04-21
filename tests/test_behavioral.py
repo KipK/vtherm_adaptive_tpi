@@ -40,6 +40,14 @@ from custom_components.vtherm_adaptive_tpi.adaptive_tpi.learning_window import (
     build_learning_window,
     classify_cycle_regime,
 )
+from custom_components.vtherm_adaptive_tpi.adaptive_tpi.startup_bootstrap import (
+    STARTUP_BOOTSTRAP_ABANDONED,
+    STARTUP_BOOTSTRAP_COMPLETED,
+    STARTUP_BOOTSTRAP_COOLDOWN,
+    STARTUP_BOOTSTRAP_IDLE,
+    STARTUP_BOOTSTRAP_PREHEAT,
+    STARTUP_BOOTSTRAP_REHEAT,
+)
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.supervisor import (
     PHASE_A,
     PHASE_B,
@@ -97,10 +105,170 @@ def test_startup_with_no_history_keeps_bootstrap_defaults() -> None:
     assert diagnostics["k_int"] == pytest.approx(0.6)
     assert diagnostics["k_ext"] == pytest.approx(0.02)
     assert diagnostics["deadtime_min"] is None
+    assert diagnostics["startup_bootstrap_active"] is False
+    assert diagnostics["startup_bootstrap_stage"] == STARTUP_BOOTSTRAP_IDLE
+    assert diagnostics["startup_bootstrap_attempt"] == 0
+    assert diagnostics["startup_bootstrap_max_attempts"] == 2
     assert diagnostics["a_hat_per_hour"] is None
     assert diagnostics["b_hat_per_hour"] is None
     assert diagnostics["tau_h"] is None
     assert diagnostics["tau_min"] is None
+
+
+def test_startup_bootstrap_cools_down_immediately_when_temperature_is_at_setpoint() -> None:
+    """Startup bootstrap should begin with an OFF cooldown when already at setpoint."""
+    algo = AdaptiveTPIAlgorithm(name="test-startup-bootstrap-cooldown")
+
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=20.0,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+
+    diagnostics = algo.get_diagnostics()
+    assert algo.on_percent == pytest.approx(0.0)
+    assert diagnostics["startup_bootstrap_active"] is True
+    assert diagnostics["startup_bootstrap_stage"] == STARTUP_BOOTSTRAP_COOLDOWN
+    assert diagnostics["startup_bootstrap_attempt"] == 1
+    assert diagnostics["startup_bootstrap_lower_target_temp"] == pytest.approx(19.7)
+    assert diagnostics["startup_bootstrap_command_on_percent"] == pytest.approx(0.0)
+
+
+def test_startup_bootstrap_retries_a_second_deadtime_cycle_when_first_one_fails() -> None:
+    """Startup bootstrap should schedule a second OFF->ON attempt when no deadtime was found."""
+    algo = AdaptiveTPIAlgorithm(name="test-startup-bootstrap-retry")
+
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=19.5,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    diagnostics = algo.get_diagnostics()
+    assert algo.on_percent == pytest.approx(1.0)
+    assert diagnostics["startup_bootstrap_stage"] == STARTUP_BOOTSTRAP_PREHEAT
+
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=20.0,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    assert algo.on_percent == pytest.approx(0.0)
+
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=19.7,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    diagnostics = algo.get_diagnostics()
+    assert algo.on_percent == pytest.approx(1.0)
+    assert diagnostics["startup_bootstrap_stage"] == STARTUP_BOOTSTRAP_REHEAT
+
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=20.0,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+
+    diagnostics = algo.get_diagnostics()
+    assert algo.on_percent == pytest.approx(0.0)
+    assert diagnostics["startup_bootstrap_active"] is True
+    assert diagnostics["startup_bootstrap_stage"] == STARTUP_BOOTSTRAP_COOLDOWN
+    assert diagnostics["startup_bootstrap_attempt"] == 2
+    assert diagnostics["startup_bootstrap_completion_reason"] is None
+
+
+def test_startup_bootstrap_completes_after_first_identified_deadtime_cycle() -> None:
+    """Startup bootstrap should stop retrying once one deadtime identification exists."""
+    algo = AdaptiveTPIAlgorithm(name="test-startup-bootstrap-complete")
+
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=20.0,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=19.7,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    algo._state.deadtime_identification_count = 1
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=20.0,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+
+    diagnostics = algo.get_diagnostics()
+    assert diagnostics["startup_bootstrap_active"] is False
+    assert diagnostics["startup_bootstrap_stage"] == STARTUP_BOOTSTRAP_COMPLETED
+    assert diagnostics["startup_bootstrap_completion_reason"] == "deadtime_identified"
+    assert algo.on_percent == pytest.approx(0.0)
+
+
+def test_startup_bootstrap_abandons_after_second_failed_deadtime_cycle() -> None:
+    """Startup bootstrap should fall back to normal control after two failed attempts."""
+    algo = AdaptiveTPIAlgorithm(name="test-startup-bootstrap-abandon")
+
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=20.0,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=19.7,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=20.0,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=19.7,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=20.0,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+
+    diagnostics = algo.get_diagnostics()
+    assert diagnostics["startup_bootstrap_active"] is False
+    assert diagnostics["startup_bootstrap_stage"] == STARTUP_BOOTSTRAP_ABANDONED
+    assert (
+        diagnostics["startup_bootstrap_completion_reason"]
+        == "deadtime_not_identified_after_retries"
+    )
+    assert algo.on_percent == pytest.approx(0.0)
 
 
 def test_diagnostics_expose_normalized_units_when_cycle_duration_is_known() -> None:

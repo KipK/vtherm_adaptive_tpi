@@ -127,6 +127,16 @@ Responsibilities:
 - project gains slowly with bounded rate limits
 - compute the nominal `on_percent`
 
+### `adaptive_tpi/startup_bootstrap.py`
+
+Startup command override used before the first deadtime identification.
+
+Responsibilities:
+
+- force a clean startup sequence around setpoint
+- keep the sequence bounded to at most two OFF->ON identification attempts
+- expose the detailed startup-bootstrap diagnostics consumed by the runtime state
+
 ## Learning Sequence
 
 ### 1. Cycle start
@@ -140,6 +150,16 @@ When VT starts a real cycle, the plugin captures:
 - hvac mode
 
 This snapshot becomes the pending cycle context.
+
+Before deadtime exists, the runtime may temporarily bypass the nominal P+feedforward
+command and use the startup bootstrap sequence instead:
+
+- if `current_temp >= target_temp`, command `0%` until `target_temp - 0.3°C`
+- if `current_temp < target_temp`, command `100%` until `target_temp`
+- once the room reached `target_temp`, command `0%` until `target_temp - 0.3°C`
+- from `target_temp - 0.3°C`, command `100%` until `target_temp`
+- if no deadtime identification was produced, repeat one more OFF->ON cycle
+- after the second failed attempt, return to nominal regulation
 
 ### 2. Cycle end
 
@@ -217,6 +237,11 @@ Useful diagnostic groups:
   - `c_nd`
   - `deadtime_candidate_costs`
   - `deadtime_b_proxy`
+- startup bootstrap:
+  - `startup_bootstrap_active`
+  - `startup_bootstrap_stage`
+  - `startup_bootstrap_attempt`
+  - `startup_bootstrap_completion_reason`
 - estimator:
   - `a_hat`
   - `b_hat`

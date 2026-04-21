@@ -62,15 +62,17 @@ At startup, the plugin does not know the plant yet.
 
 A normal early progression is:
 
-1. deadtime starts to emerge
-2. `b` starts learning from OFF windows
-3. `a` starts only later, once deadtime is credible and `b` is stable
+1. if no deadtime identification exists yet, startup bootstrap may force one or two clean OFF->ON attempts
+2. deadtime starts to emerge
+3. `b` starts learning from OFF windows
+4. `a` starts only later, once deadtime is credible and `b` is stable
 
 So it is normal at first to see:
 
 - `a_hat` frozen
 - `b_converged = false`
 - gains still close to defaults
+- `startup_bootstrap_active = true` during the initial forced sequence
 
 ### 3. Use diagnostics to understand learning
 
@@ -78,6 +80,10 @@ The plugin exposes learning diagnostics in the climate `specific_states`.
 
 The most useful fields to inspect first are:
 
+- `startup_bootstrap_active`
+- `startup_bootstrap_stage`
+- `startup_bootstrap_attempt`
+- `startup_bootstrap_completion_reason`
 - `nd_hat`
 - `c_nd`
 - `b_hat`
@@ -110,6 +116,11 @@ At a high level, the runtime loop is:
 Important design points:
 
 - learning uses real completed cycles, not every sensor refresh
+- when deadtime is still unknown, startup may temporarily override the nominal command:
+  - if already at or above setpoint, stay OFF until `target - 0.3°C`
+  - if below setpoint, first heat to setpoint, then cool to `target - 0.3°C`
+  - from `target - 0.3°C`, heat at `100%` until setpoint
+  - if no deadtime identification is produced, retry once, then fall back to normal regulation
 - OFF and ON windows are handled separately
 - learning is intentionally conservative
 - diagnostics are first-class because they are essential for tuning and debugging

@@ -114,6 +114,14 @@ class AdaptiveTPIState:
     learning_route_selected: str | None = None
     learning_route_block_reason: str | None = None
     deadtime_learning_blackout_active: bool = False
+    startup_bootstrap_active: bool = False
+    startup_bootstrap_stage: str = "idle"
+    startup_bootstrap_attempt: int = 0
+    startup_bootstrap_max_attempts: int = 2
+    startup_bootstrap_target_temp: float | None = None
+    startup_bootstrap_lower_target_temp: float | None = None
+    startup_bootstrap_command_on_percent: float | None = None
+    startup_bootstrap_completion_reason: str | None = None
 
     def to_persisted_dict(self) -> dict[str, Any]:
         """Return the adaptive state that must survive restarts."""

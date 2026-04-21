@@ -19,6 +19,7 @@ from .adaptive_tpi.learning_window import (
     build_learning_window,
     classify_cycle_regime,
 )
+from .adaptive_tpi.startup_bootstrap import StartupBootstrapController, StartupBootstrapSnapshot
 from .adaptive_tpi.state import AdaptiveTPIState
 from .adaptive_tpi.supervisor import AdaptiveTPISupervisor, PHASE_A, PHASE_B
 from .const import DEFAULT_KEXT, DEFAULT_KINT, DEFAULT_RESPONSIVENESS, RESPONSIVENESS_TO_TAU_CL_MIN
@@ -71,6 +72,7 @@ class AdaptiveTPIAlgorithm:
         self._supervisor = AdaptiveTPISupervisor(phase=self._state.bootstrap_phase)
         self._deadtime_model = DeadtimeModel()
         self._estimator = ParameterEstimator()
+        self._startup_bootstrap = StartupBootstrapController()
         self._state.a_hat = self._estimator.a_hat
         self._state.b_hat = self._estimator.b_hat
         self._last_accepted_at: datetime | None = None
@@ -102,14 +104,25 @@ class AdaptiveTPIAlgorithm:
             setpoint_transition_active=bool(kwargs.get("setpoint_transition_active", False)),
         )
         self._supervisor.apply_to_state(self._state)
+        heating_enabled = hvac_mode is not None and not str(hvac_mode).lower().endswith(
+            ("off", "sleep")
+        )
 
         if target_temp is None or current_temp is None:
+            self._apply_startup_bootstrap_snapshot(
+                self._startup_bootstrap.evaluate(
+                    target_temp=target_temp,
+                    current_temp=current_temp,
+                    deadtime_identification_count=self._state.deadtime_identification_count,
+                    heating_enabled=heating_enabled,
+                )
+            )
             self._state.calculated_on_percent = 0.0
             self._temperature_available = False
             return
 
         self._temperature_available = True
-        self._state.calculated_on_percent = compute_on_percent(
+        command_on_percent = compute_on_percent(
             hvac_mode=hvac_mode,
             target_temp=target_temp,
             current_temp=current_temp,
@@ -118,7 +131,17 @@ class AdaptiveTPIAlgorithm:
             k_ext=self._state.k_ext,
             max_on_percent=self._max_on_percent,
         )
-        self._state.on_percent = self._state.calculated_on_percent
+        bootstrap_snapshot = self._startup_bootstrap.evaluate(
+            target_temp=target_temp,
+            current_temp=current_temp,
+            deadtime_identification_count=self._state.deadtime_identification_count,
+            heating_enabled=heating_enabled,
+        )
+        self._apply_startup_bootstrap_snapshot(bootstrap_snapshot)
+        if bootstrap_snapshot.command_on_percent is not None:
+            command_on_percent = bootstrap_snapshot.command_on_percent
+        self._state.calculated_on_percent = command_on_percent
+        self._state.on_percent = command_on_percent
 
     def update_realized_power(self, power_percent: float) -> None:
         """Record the power effectively applied after scheduler constraints."""
@@ -411,6 +434,7 @@ class AdaptiveTPIAlgorithm:
         self._last_accepted_at = None
         self._temperature_available = False
         self._pending_cycle_sample = None
+        self._startup_bootstrap.reset()
 
     def persistence_metadata(self, *, cycle_min: float) -> dict[str, Any]:
         """Return the persistence metadata required for safe warm starts."""
@@ -714,3 +738,14 @@ class AdaptiveTPIAlgorithm:
             default_kint=self._default_kint,
             default_kext=self._default_kext,
         )
+
+    def _apply_startup_bootstrap_snapshot(self, snapshot: StartupBootstrapSnapshot) -> None:
+        """Copy the startup bootstrap status into the public runtime state."""
+        self._state.startup_bootstrap_active = snapshot.active
+        self._state.startup_bootstrap_stage = snapshot.stage
+        self._state.startup_bootstrap_attempt = snapshot.attempt
+        self._state.startup_bootstrap_max_attempts = snapshot.max_attempts
+        self._state.startup_bootstrap_target_temp = snapshot.target_temp
+        self._state.startup_bootstrap_lower_target_temp = snapshot.lower_target_temp
+        self._state.startup_bootstrap_command_on_percent = snapshot.command_on_percent
+        self._state.startup_bootstrap_completion_reason = snapshot.completion_reason

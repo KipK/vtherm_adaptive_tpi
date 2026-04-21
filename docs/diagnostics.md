@@ -40,6 +40,36 @@ Typical interpretation:
 - early phases: deadtime and `b` are still being built
 - later phases: `a` and gain projection can contribute more
 
+### Startup bootstrap
+
+- `startup_bootstrap_active`
+- `startup_bootstrap_stage`
+- `startup_bootstrap_attempt`
+- `startup_bootstrap_max_attempts`
+- `startup_bootstrap_target_temp`
+- `startup_bootstrap_lower_target_temp`
+- `startup_bootstrap_command_on_percent`
+- `startup_bootstrap_completion_reason`
+
+These fields track the forced startup sequence used before the first deadtime identification.
+
+Typical stages are:
+
+- `idle`
+- `preheat_to_target`
+- `cooldown_below_target`
+- `reheat_to_target`
+- `completed`
+- `abandoned`
+
+Interpretation:
+
+- `startup_bootstrap_active = true` means the scheduler command is currently overridden
+- `startup_bootstrap_attempt` shows whether the runtime is on the first or second OFF->ON attempt
+- `startup_bootstrap_lower_target_temp` is the temporary OFF threshold, equal to `target - 0.3°C`
+- `startup_bootstrap_command_on_percent` is the forced command currently requested by the bootstrap state machine
+- `startup_bootstrap_completion_reason` explains how the sequence ended
+
 ### Gains
 
 - `k_int`
@@ -216,6 +246,20 @@ Look at:
 - `b_last_reason`
 
 This usually means the learning guards or the window builder are rejecting the cycle.
+
+### Case 2b: deadtime still does not appear at startup
+
+Look at:
+
+- `startup_bootstrap_active`
+- `startup_bootstrap_stage`
+- `startup_bootstrap_attempt`
+- `startup_bootstrap_completion_reason`
+- `deadtime_identification_count`
+
+If the bootstrap reaches `abandoned` after attempt `2` and `deadtime_identification_count`
+is still `0`, the plugin has already exhausted the dedicated startup sequence and has
+returned to normal regulation.
 
 ### Case 3: `b` does not move in OFF phase
 
