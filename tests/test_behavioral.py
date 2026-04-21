@@ -743,6 +743,42 @@ def test_learning_window_can_extend_across_multiple_off_cycles() -> None:
     assert result.sample.dTdt == pytest.approx(-0.25 / 3.0)
 
 
+def test_learning_window_allows_bootstrap_off_cycle_near_setpoint() -> None:
+    """A bootstrap cooldown OFF cycle may feed `b` even if estimator-informative is false."""
+    result = build_learning_window(
+        (
+            CycleHistoryEntry(
+                tin=22.0,
+                tout=10.0,
+                target_temp=22.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=False,
+                bootstrap_b_learning_allowed=True,
+                cycle_duration_min=10.0,
+            ),
+            CycleHistoryEntry(
+                tin=21.7,
+                tout=10.0,
+                target_temp=22.0,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=False,
+                is_estimator_informative=False,
+                cycle_duration_min=10.0,
+            ),
+        ),
+        nd_hat=0.0,
+        regime=WINDOW_REGIME_OFF,
+    )
+
+    assert result.sample is not None
+    assert result.reason == "off_window_ready"
+    assert result.sample.allow_near_setpoint_b is True
+    assert result.sample.setpoint_error == pytest.approx(0.0)
+
+
 def test_learning_window_reports_dt_per_cycle_not_per_minute() -> None:
     """The learning slope must stay in the discrete per-cycle units used by the controller."""
     result = build_learning_window(
@@ -1273,6 +1309,25 @@ def test_estimator_can_learn_b_on_zero_power_cycles() -> None:
     assert update.b_last_reason == "sample_accepted"
 
 
+def test_estimator_can_learn_b_near_setpoint_during_bootstrap_cooldown() -> None:
+    """Bootstrap cooldown may feed `b` even when the cycle started near setpoint."""
+    estimator = ParameterEstimator()
+
+    update = estimator.update_b(
+        BSample(
+            dTdt=-0.06,
+            delta_out=8.0,
+            setpoint_error=0.0,
+            u_eff=0.0,
+            allow_near_setpoint_b=True,
+        )
+    )
+
+    assert update.updated is True
+    assert update.b_hat > 0.0
+    assert update.b_last_reason == "sample_accepted"
+
+
 def test_a_does_not_move_until_b_has_converged() -> None:
     """The heating gain must stay frozen until the loss estimate is stable enough."""
     estimator = ParameterEstimator()
@@ -1473,6 +1528,74 @@ def test_deadtime_history_keeps_committed_cycle_power(
     )
 
     assert recorded_powers == [pytest.approx(0.8)]
+
+
+def test_bootstrap_cooldown_off_cycle_can_update_b_near_setpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bootstrap cooldown OFF cycle should be allowed to feed `b` near setpoint."""
+    algo = AdaptiveTPIAlgorithm(name="test-bootstrap-b-cooldown", debug_mode=True)
+
+    def fake_record_cycle(observation, **kwargs):
+        algo._deadtime_model._cycle_history.append(
+            CycleHistoryEntry(
+                tin=observation.tin,
+                tout=observation.tout,
+                target_temp=observation.target_temp,
+                applied_power=observation.applied_power,
+                is_valid=kwargs["is_valid"],
+                is_informative=kwargs["is_informative"],
+                is_estimator_informative=kwargs["is_estimator_informative"],
+                bootstrap_b_learning_allowed=kwargs["bootstrap_b_learning_allowed"],
+                cycle_duration_min=kwargs["cycle_duration_min"],
+            )
+        )
+        return DeadtimeSearchResult(
+            nd_hat=0.0,
+            c_nd=0.0,
+            locked=False,
+            best_candidate=None,
+            second_best_candidate=None,
+            best_candidate_a=None,
+            best_candidate_b=None,
+            candidate_costs={},
+            lock_reason="deadtime_insufficient_identifications",
+        )
+
+    monkeypatch.setattr(algo._deadtime_model, "record_cycle", fake_record_cycle)
+
+    algo.calculate(
+        target_temp=22.0,
+        current_temp=22.0,
+        ext_current_temp=10.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    algo.on_cycle_started(
+        on_time_sec=0.0,
+        off_time_sec=600.0,
+        on_percent=0.0,
+        hvac_mode="heat",
+        target_temp=22.0,
+        current_temp=22.0,
+        ext_current_temp=10.0,
+    )
+    algo.on_cycle_completed(
+        e_eff=0.0,
+        elapsed_ratio=1.0,
+        cycle_duration_min=10.0,
+        target_temp=22.0,
+        current_temp=21.7,
+        ext_current_temp=10.0,
+        hvac_mode="heat",
+    )
+
+    diagnostics = algo.get_diagnostics()
+    assert diagnostics["learning_route_selected"] == "b"
+    assert diagnostics["last_learning_attempt_reason"] == "sample_accepted"
+    assert diagnostics["b_last_reason"] == "sample_accepted"
+    assert diagnostics["b_samples_count"] >= 1
+    assert diagnostics["b_hat"] > 0.0
 
 
 def test_disturbed_cycle_freezes_adaptation() -> None:

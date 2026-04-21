@@ -121,6 +121,7 @@ Important design points:
   - if below setpoint, first heat to setpoint, then cool to `target - 0.3°C`
   - from `target - 0.3°C`, heat at `100%` until setpoint
   - if no deadtime identification is produced, retry once, then fall back to normal regulation
+  - the forced OFF cooldown may also feed the initial `b` learning path even when it starts very close to setpoint
 - OFF and ON windows are handled separately
 - learning is intentionally conservative
 - diagnostics are first-class because they are essential for tuning and debugging

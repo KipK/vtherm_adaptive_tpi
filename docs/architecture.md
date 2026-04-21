@@ -160,6 +160,7 @@ command and use the startup bootstrap sequence instead:
 - from `target_temp - 0.3°C`, command `100%` until `target_temp`
 - if no deadtime identification was produced, repeat one more OFF->ON cycle
 - after the second failed attempt, return to nominal regulation
+- the OFF cooldown cycles created by this sequence may also feed the first `b` updates, even when they start near setpoint
 
 ### 2. Cycle end
 

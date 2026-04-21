@@ -33,6 +33,7 @@ class LearningWindowSample:
     points_count: int
     total_duration_min: float
     amplitude: float
+    allow_near_setpoint_b: bool = False
 
 
 @dataclass(slots=True)
@@ -52,6 +53,13 @@ def classify_cycle_regime(applied_power: float) -> str:
     if applied_power >= ON_POWER_MIN:
         return WINDOW_REGIME_ON
     return WINDOW_REGIME_MIXED
+
+
+def _can_feed_estimator(entry: CycleHistoryEntry, regime: str) -> bool:
+    """Return True when one cycle may contribute to estimator learning."""
+    if entry.is_estimator_informative:
+        return True
+    return regime == WINDOW_REGIME_OFF and entry.bootstrap_b_learning_allowed
 
 
 def build_learning_window(
@@ -104,7 +112,7 @@ def build_anchored_learning_window(
             reason=f"{regime}_window_invalid_anchor",
             waiting_next_cycle=False,
         )
-    if not observations[end_index].is_estimator_informative:
+    if not _can_feed_estimator(observations[end_index], regime):
         return LearningWindowResult(
             sample=None,
             reason=f"{regime}_window_not_estimator_informative",
@@ -128,7 +136,7 @@ def build_anchored_learning_window(
     cycle_count = 1
     while start_index > 0 and cycle_count < MAX_WINDOW_CYCLES:
         previous = observations[start_index - 1]
-        if not previous.is_estimator_informative:
+        if not _can_feed_estimator(previous, regime):
             break
         previous_regime = classify_cycle_regime(previous.applied_power)
         if previous_regime != regime and previous_regime != WINDOW_REGIME_MIXED:
@@ -243,6 +251,9 @@ def build_anchored_learning_window(
             points_count=cycle_count + 1,
             total_duration_min=total_duration_min,
             amplitude=amplitude,
+            allow_near_setpoint_b=any(
+                entry.bootstrap_b_learning_allowed for entry in cycle_slice
+            ),
         ),
         reason=f"{regime}_window_ready",
         waiting_next_cycle=False,
@@ -258,7 +269,7 @@ def _find_latest_candidate_end(
     for candidate_index in range(len(observations) - 2, -1, -1):
         current = observations[candidate_index]
         nxt = observations[candidate_index + 1]
-        if not current.is_estimator_informative or not nxt.is_valid:
+        if not _can_feed_estimator(current, regime) or not nxt.is_valid:
             continue
         if _matches_regime(current, regime):
             return candidate_index

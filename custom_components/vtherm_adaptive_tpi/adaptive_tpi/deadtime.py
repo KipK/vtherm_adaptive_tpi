@@ -59,6 +59,7 @@ class CycleHistoryEntry:
     is_valid: bool
     is_informative: bool
     is_estimator_informative: bool
+    bootstrap_b_learning_allowed: bool = False
     cycle_duration_min: float = 5.0
 
 
@@ -288,6 +289,7 @@ class DeadtimeModel:
         is_valid: bool,
         is_informative: bool,
         is_estimator_informative: bool = False,
+        bootstrap_b_learning_allowed: bool = False,
     ) -> DeadtimeSearchResult:
         """Append one cycle and trigger step detection when valid."""
         self._cycle_history.append(
@@ -300,6 +302,7 @@ class DeadtimeModel:
                 is_valid=is_valid,
                 is_informative=is_informative,
                 is_estimator_informative=is_estimator_informative,
+                bootstrap_b_learning_allowed=bootstrap_b_learning_allowed,
             )
         )
         self._trim_history_if_needed()

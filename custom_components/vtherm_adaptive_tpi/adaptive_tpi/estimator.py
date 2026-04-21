@@ -33,6 +33,7 @@ class BSample:
     delta_out: float
     setpoint_error: float
     u_eff: float
+    allow_near_setpoint_b: bool = False
 
 
 @dataclass(slots=True)
@@ -227,7 +228,10 @@ class ParameterEstimator:
         if abs(sample.delta_out) < MIN_DELTA_OUT:
             self._b_estimator.last_reason = "b_delta_out_too_small"
             return self._snapshot(i_a=0.0, i_b=0.0, a_updated=False, b_updated=False)
-        if sample.setpoint_error < MIN_SETPOINT_ERROR:
+        if (
+            sample.setpoint_error < MIN_SETPOINT_ERROR
+            and not sample.allow_near_setpoint_b
+        ):
             self._b_estimator.last_reason = "b_setpoint_error_too_small"
             return self._snapshot(i_a=0.0, i_b=0.0, a_updated=False, b_updated=False)
         if sample.u_eff > MAX_OFF_U_EFF:

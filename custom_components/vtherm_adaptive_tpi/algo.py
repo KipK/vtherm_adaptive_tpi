@@ -19,7 +19,11 @@ from .adaptive_tpi.learning_window import (
     build_learning_window,
     classify_cycle_regime,
 )
-from .adaptive_tpi.startup_bootstrap import StartupBootstrapController, StartupBootstrapSnapshot
+from .adaptive_tpi.startup_bootstrap import (
+    STARTUP_BOOTSTRAP_COOLDOWN,
+    StartupBootstrapController,
+    StartupBootstrapSnapshot,
+)
 from .adaptive_tpi.state import AdaptiveTPIState
 from .adaptive_tpi.supervisor import AdaptiveTPISupervisor, PHASE_A, PHASE_B
 from .const import DEFAULT_KEXT, DEFAULT_KINT, DEFAULT_RESPONSIVENESS, RESPONSIVENESS_TO_TAU_CL_MIN
@@ -43,6 +47,7 @@ class CycleSample:
     outdoor_temp: float
     applied_power: float
     hvac_mode: Any
+    bootstrap_b_learning_allowed: bool = False
 
 
 class AdaptiveTPIAlgorithm:
@@ -173,6 +178,11 @@ class AdaptiveTPIAlgorithm:
             outdoor_temp=ext_current_temp,
             applied_power=self._state.on_percent,
             hvac_mode=hvac_mode,
+            bootstrap_b_learning_allowed=(
+                self._state.startup_bootstrap_active
+                and self._state.startup_bootstrap_stage == STARTUP_BOOTSTRAP_COOLDOWN
+                and classify_cycle_regime(self._state.on_percent) == WINDOW_REGIME_OFF
+            ),
         )
 
     def on_cycle_completed(
@@ -279,6 +289,7 @@ class AdaptiveTPIAlgorithm:
             is_valid=True,
             is_informative=deadtime_informative,
             is_estimator_informative=estimator_informative,
+            bootstrap_b_learning_allowed=pending_cycle.bootstrap_b_learning_allowed,
         )
         self._state.nd_hat = deadtime_result.nd_hat
         self._state.c_nd = deadtime_result.c_nd
@@ -338,6 +349,7 @@ class AdaptiveTPIAlgorithm:
                         delta_out=off_window.sample.delta_out,
                         setpoint_error=off_window.sample.setpoint_error,
                         u_eff=off_window.sample.u_eff,
+                        allow_near_setpoint_b=off_window.sample.allow_near_setpoint_b,
                     ),
                     reason=off_window.reason,
                 )
@@ -720,6 +732,7 @@ class AdaptiveTPIAlgorithm:
             is_valid=is_valid,
             is_informative=is_informative,
             is_estimator_informative=is_estimator_informative,
+            bootstrap_b_learning_allowed=sample.bootstrap_b_learning_allowed,
         )
 
     def _refresh_projected_gains(self) -> None:
