@@ -17,7 +17,7 @@ from .deadtime import (
     StepIdentification,
 )
 
-TEMPORAL_CONFIRMATION_POINTS = 3
+TEMPORAL_CONFIRMATION_POINTS = 1
 
 
 @dataclass(slots=True)
@@ -168,7 +168,7 @@ class DeadtimeTracker:
                 step.candidate_points_count = 1
         elif incremental_delta > 0.0:
             step.candidate_points_count += 1
-        else:
+        elif incremental_delta < 0.0:
             step.candidate_started_at = None
             step.candidate_points_count = 0
 

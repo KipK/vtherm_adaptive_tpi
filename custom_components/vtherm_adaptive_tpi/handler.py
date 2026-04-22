@@ -7,6 +7,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.storage import Store
 
 from .algo import AdaptiveTPIAlgorithm
@@ -41,6 +43,7 @@ class AdaptiveTPIHandler:
         self._thermostat = thermostat
         self._should_publish_intermediate = True
         self._published_diagnostics: dict[str, Any] = {}
+        self._cancel_temp_listener = None
         storage_key = self._build_storage_key(thermostat.unique_id)
         self._storage_key = storage_key
         self._store: Store[dict[str, Any]] = Store(
@@ -98,12 +101,49 @@ class AdaptiveTPIHandler:
     async def async_added_to_hass(self) -> None:
         """Run startup actions when the thermostat entity is added."""
         await self._async_load_persisted_state()
+        self._register_temperature_listener()
 
     async def async_startup(self) -> None:
         """Run startup actions after thermostat initialization."""
 
+    def _register_temperature_listener(self) -> None:
+        """Register a direct listener on the temperature sensor for deadtime tracking."""
+        if self._cancel_temp_listener is not None:
+            return
+        t = self._thermostat
+        sensor_id = (t.entry_infos or {}).get("temperature_sensor_entity_id")
+        if not sensor_id:
+            return
+        self._cancel_temp_listener = async_track_state_change_event(
+            t.hass,
+            [sensor_id],
+            self._on_sensor_temperature_changed,
+        )
+
+    async def _on_sensor_temperature_changed(self, event) -> None:
+        """Forward each raw sensor reading to the deadtime tracker."""
+        new_state = event.data.get("new_state")
+        if new_state is None or new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return
+        t = self._thermostat
+        if t.prop_algorithm is None or not hasattr(t.prop_algorithm, "observe_temperature_update"):
+            return
+        try:
+            temp = float(new_state.state)
+        except (ValueError, TypeError):
+            return
+        t.prop_algorithm.observe_temperature_update(
+            current_temp=temp,
+            target_temp=t.target_temperature,
+            measured_at=new_state.last_updated,
+            hvac_mode=t.vtherm_hvac_mode,
+        )
+
     def remove(self) -> None:
         """Release resources held by the handler."""
+        if self._cancel_temp_listener is not None:
+            self._cancel_temp_listener()
+            self._cancel_temp_listener = None
         self._thermostat.hass.async_create_task(self._async_save_persisted_state())
 
     async def control_heating(
