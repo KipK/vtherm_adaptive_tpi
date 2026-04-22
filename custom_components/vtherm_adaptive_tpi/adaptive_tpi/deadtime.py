@@ -329,6 +329,7 @@ class DeadtimeModel:
         is_estimator_informative: bool = False,
         bootstrap_b_learning_allowed: bool = False,
         mode_sign: int = 1,
+        track_step_response: bool = True,
     ) -> DeadtimeSearchResult:
         """Append one cycle and trigger step detection when valid."""
         self._cycle_history.append(
@@ -346,10 +347,25 @@ class DeadtimeModel:
         )
         self._trim_history_if_needed()
 
-        if is_valid:
+        if is_valid and track_step_response:
             self.last_result = self.evaluate(mode_sign=mode_sign)
+        else:
+            self.last_result = self._recompute_nd_hat()
 
         return self.last_result
+
+    def record_identification(self, identification: StepIdentification) -> DeadtimeSearchResult:
+        """Append one externally confirmed temporal identification."""
+        self._identifications.append(identification)
+        self.last_result = self._recompute_nd_hat()
+        return self.last_result
+
+    def estimate_b_proxy_for_next_step(self) -> float | None:
+        """Estimate `b` from the recent OFF history before a new ON step starts."""
+        observations = tuple(self._cycle_history)
+        if not observations:
+            return None
+        return _compute_b_proxy(observations, len(observations))
 
     def evaluate(self, *, track_winner: bool = True, mode_sign: int = 1) -> DeadtimeSearchResult:
         """Scan for step identifications and recompute nd_hat."""

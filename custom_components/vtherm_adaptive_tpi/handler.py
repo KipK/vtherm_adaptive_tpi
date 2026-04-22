@@ -203,6 +203,16 @@ class AdaptiveTPIHandler:
         del changed
         t = self._thermostat
         if (
+            t.prop_algorithm is not None
+            and hasattr(t.prop_algorithm, "observe_temperature_update")
+        ):
+            t.prop_algorithm.observe_temperature_update(
+                current_temp=t.current_temperature,
+                target_temp=t.target_temperature,
+                measured_at=getattr(t, "last_temperature_measure", None),
+                hvac_mode=t.vtherm_hvac_mode,
+            )
+        if (
             t.prop_algorithm is None
             or not hasattr(t.prop_algorithm, "should_force_bootstrap_cycle_restart")
             or t.cycle_scheduler is None
@@ -271,6 +281,7 @@ class AdaptiveTPIHandler:
             e_eff=e_eff,
             elapsed_ratio=elapsed_ratio,
             cycle_duration_min=cycle_duration_min,
+            measure_timestamp=getattr(t, "last_temperature_measure", None),
             target_temp=t.target_temperature,
             current_temp=t.current_temperature,
             ext_current_temp=t.current_outdoor_temperature,

@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 from .adaptive_tpi.controller import compute_on_percent, project_gains
 from .adaptive_tpi.deadtime import CycleHistoryEntry, DeadtimeModel, DeadtimeObservation
+from .adaptive_tpi.deadtime_tracker import DeadtimeTracker
 from .adaptive_tpi.diagnostics import build_diagnostics
 from .adaptive_tpi.estimator import ASample, BSample, ParameterEstimator
 from .adaptive_tpi.learning_window import (
@@ -77,6 +78,7 @@ class AdaptiveTPIAlgorithm:
         )
         self._supervisor = AdaptiveTPISupervisor(phase=self._state.bootstrap_phase)
         self._deadtime_model = DeadtimeModel()
+        self._deadtime_tracker = DeadtimeTracker(now_provider=self._utc_now)
         self._estimator = ParameterEstimator()
         self._startup_bootstrap = StartupBootstrapController()
         self._state.a_hat = self._estimator.a_hat
@@ -168,14 +170,27 @@ class AdaptiveTPIAlgorithm:
         ext_current_temp: float | None,
     ) -> None:
         """Capture the committed cycle start conditions from the scheduler."""
-        del on_time_sec, off_time_sec
         self._state.cycle_started_calls_count += 1
         self._state.last_cycle_started_at = self._utc_now().isoformat()
+        previous_committed_on_percent = self._state.committed_on_percent
         self.update_realized_power(on_percent)
         if target_temp is None or current_temp is None or ext_current_temp is None:
             self._pending_cycle_sample = None
             return
         self._temperature_available = True
+        cycle_duration_min = max(0.0, float(on_time_sec + off_time_sec) / 60.0)
+        self._deadtime_tracker.on_cycle_started(
+            started_at=self._utc_now(),
+            current_temp=current_temp,
+            target_temp=target_temp,
+            on_percent=on_percent,
+            previous_on_percent=previous_committed_on_percent,
+            mode_sign=hvac_mode_sign(hvac_mode),
+            cycle_duration_min=cycle_duration_min,
+            cycle_index=len(self._deadtime_model.cycle_history),
+            b_proxy=self._deadtime_model.estimate_b_proxy_for_next_step(),
+        )
+        self._state.deadtime_pending_step = self._deadtime_tracker.has_pending_step
 
         self._pending_cycle_sample = CycleSample(
             target_temp=target_temp,
@@ -196,6 +211,7 @@ class AdaptiveTPIAlgorithm:
         e_eff: float | None = None,
         elapsed_ratio: float = 1.0,
         cycle_duration_min: float | None = None,
+        measure_timestamp: datetime | None = None,
         target_temp: float | None,
         current_temp: float | None,
         ext_current_temp: float | None,
@@ -208,6 +224,13 @@ class AdaptiveTPIAlgorithm:
         self._state.last_cycle_completed_at = self._utc_now().isoformat()
         pending_cycle = self._pending_cycle_sample
         self._pending_cycle_sample = None
+
+        self.observe_temperature_update(
+            current_temp=current_temp,
+            target_temp=target_temp,
+            measured_at=measure_timestamp,
+            hvac_mode=hvac_mode,
+        )
 
         if pending_cycle is None:
             self._state.last_learning_attempt_reason = "missing_cycle_context"
@@ -293,27 +316,9 @@ class AdaptiveTPIAlgorithm:
             is_estimator_informative=estimator_informative,
             bootstrap_b_learning_allowed=pending_cycle.bootstrap_b_learning_allowed,
             mode_sign=hvac_mode_sign(pending_cycle.hvac_mode),
+            track_step_response=False,
         )
-        self._state.nd_hat = deadtime_result.nd_hat
-        self._state.deadtime_minutes = deadtime_result.nd_minutes
-        self._state.c_nd = deadtime_result.c_nd
-        self._state.deadtime_locked = deadtime_result.locked
-        self._state.deadtime_best_candidate = deadtime_result.best_candidate
-        self._state.deadtime_second_best_candidate = deadtime_result.second_best_candidate
-        self._state.deadtime_b_proxy = deadtime_result.best_candidate_b
-        self._state.deadtime_identification_count = len(self._deadtime_model._identifications)
-        self._state.deadtime_identification_qualities = deadtime_result.candidate_costs
-        self._state.deadtime_pending_step = self._deadtime_model._pending_step_index is not None
-        self._supervisor.apply_deadtime_result(
-            locked=deadtime_result.locked,
-            confidence=deadtime_result.c_nd,
-            lock_reason=deadtime_result.lock_reason,
-        )
-        self._state.a_learning_enabled = self._supervisor.is_a_learning_enabled(
-            deadtime_locked=deadtime_result.locked,
-            c_nd=deadtime_result.c_nd,
-            b_converged=self._state.b_converged,
-        )
+        self._apply_deadtime_result(deadtime_result)
         if (
             self._state.b_samples_count == 0
             and deadtime_result.best_candidate_b is not None
@@ -446,6 +451,7 @@ class AdaptiveTPIAlgorithm:
         )
         self._supervisor.reset()
         self._deadtime_model.reset()
+        self._deadtime_tracker.reset()
         self._estimator.reset()
         self._state.a_hat = self._estimator.a_hat
         self._state.b_hat = self._estimator.b_hat
@@ -522,7 +528,7 @@ class AdaptiveTPIAlgorithm:
                 self._state.deadtime_b_proxy = deadtime_result.best_candidate_b
                 self._state.deadtime_identification_count = len(self._deadtime_model._identifications)
                 self._state.deadtime_identification_qualities = deadtime_result.candidate_costs
-                self._state.deadtime_pending_step = self._deadtime_model._pending_step_index is not None
+                self._state.deadtime_pending_step = self._deadtime_tracker.has_pending_step
             self._state.a_hat = self._estimator.a_hat
             self._state.b_hat = self._estimator.b_hat
             self._state.c_a = self._estimator.c_a
@@ -592,6 +598,60 @@ class AdaptiveTPIAlgorithm:
         error = abs(self._state.b_hat - proxy) / scale
         self._state.b_crosscheck_error = error
         self._state.b_methods_consistent = error <= _B_METHODS_CONSISTENT_THRESHOLD
+
+    def observe_temperature_update(
+        self,
+        *,
+        current_temp: float | None,
+        target_temp: float | None,
+        measured_at: datetime | None,
+        hvac_mode,
+    ) -> None:
+        """Track deadtime from raw temperature updates while cycles remain active."""
+        identification = self._deadtime_tracker.observe_temperature(
+            measured_at=measured_at,
+            current_temp=current_temp,
+            target_temp=target_temp,
+            mode_sign=hvac_mode_sign(hvac_mode),
+        )
+        self._state.deadtime_pending_step = self._deadtime_tracker.has_pending_step
+        if identification is None:
+            return
+        deadtime_result = self._deadtime_model.record_identification(identification)
+        self._apply_deadtime_result(deadtime_result)
+        if (
+            self._state.b_samples_count == 0
+            and deadtime_result.best_candidate_b is not None
+            and deadtime_result.c_nd >= _DEADTIME_B_PROXY_SEED_CONFIDENCE
+        ):
+            self._apply_estimator_update(
+                self._estimator.seed_b_from_deadtime_proxy(deadtime_result.best_candidate_b)
+            )
+            self._refresh_b_crosscheck()
+
+    def _apply_deadtime_result(self, deadtime_result) -> None:
+        """Mirror one deadtime result into the public adaptive state."""
+        self._state.nd_hat = deadtime_result.nd_hat
+        self._state.deadtime_minutes = deadtime_result.nd_minutes
+        self._state.c_nd = deadtime_result.c_nd
+        self._state.deadtime_locked = deadtime_result.locked
+        self._state.deadtime_best_candidate = deadtime_result.best_candidate
+        self._state.deadtime_second_best_candidate = deadtime_result.second_best_candidate
+        self._state.deadtime_b_proxy = deadtime_result.best_candidate_b
+        self._state.deadtime_identification_count = len(self._deadtime_model._identifications)
+        self._state.deadtime_identification_qualities = deadtime_result.candidate_costs
+        self._state.deadtime_pending_step = self._deadtime_tracker.has_pending_step
+        self._supervisor.apply_deadtime_result(
+            locked=deadtime_result.locked,
+            confidence=deadtime_result.c_nd,
+            lock_reason=deadtime_result.lock_reason,
+        )
+        self._state.a_learning_enabled = self._supervisor.is_a_learning_enabled(
+            deadtime_locked=deadtime_result.locked,
+            c_nd=deadtime_result.c_nd,
+            b_converged=self._state.b_converged,
+        )
+        self._supervisor.apply_to_state(self._state)
 
     @property
     def on_percent(self) -> float | None:
@@ -756,6 +816,7 @@ class AdaptiveTPIAlgorithm:
             is_estimator_informative=is_estimator_informative,
             bootstrap_b_learning_allowed=sample.bootstrap_b_learning_allowed,
             mode_sign=hvac_mode_sign(sample.hvac_mode),
+            track_step_response=False,
         )
 
     def _refresh_projected_gains(self) -> None:

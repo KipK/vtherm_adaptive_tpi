@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import math
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -107,6 +108,69 @@ def test_startup_with_no_history_keeps_bootstrap_defaults() -> None:
     assert diagnostics["drift_rate_per_hour"] is None
     assert diagnostics["thermal_time_constant_hours"] is None
     assert diagnostics["control_rate_converged"] is False
+
+
+def test_temporal_deadtime_identification_survives_interrupted_cycle() -> None:
+    """A raw-temperature onset should identify deadtime even if the cycle is interrupted."""
+    algo = AdaptiveTPIAlgorithm(name="test-temporal-deadtime")
+    step_started_at = datetime(2026, 4, 22, 12, 57, 3, tzinfo=timezone.utc)
+    algo._utc_now = lambda: step_started_at
+
+    algo.on_cycle_started(
+        on_time_sec=300.0,
+        off_time_sec=0.0,
+        on_percent=1.0,
+        hvac_mode="heat",
+        target_temp=25.0,
+        current_temp=24.57,
+        ext_current_temp=17.48,
+    )
+
+    algo.observe_temperature_update(
+        current_temp=24.563,
+        target_temp=25.0,
+        measured_at=step_started_at + timedelta(seconds=30),
+        hvac_mode="heat",
+    )
+    assert algo.get_diagnostics()["deadtime_minutes"] is None
+
+    algo.observe_temperature_update(
+        current_temp=24.596,
+        target_temp=25.0,
+        measured_at=step_started_at + timedelta(seconds=60),
+        hvac_mode="heat",
+    )
+    algo.observe_temperature_update(
+        current_temp=24.632,
+        target_temp=25.0,
+        measured_at=step_started_at + timedelta(seconds=90),
+        hvac_mode="heat",
+    )
+    algo.observe_temperature_update(
+        current_temp=24.681,
+        target_temp=25.0,
+        measured_at=step_started_at + timedelta(seconds=120),
+        hvac_mode="heat",
+    )
+
+    diagnostics = algo.get_diagnostics()
+    assert diagnostics["deadtime_minutes"] == pytest.approx(1.0)
+    assert diagnostics["deadtime_cycles"] == pytest.approx(0.2)
+
+    algo.on_cycle_completed(
+        elapsed_ratio=0.85,
+        cycle_duration_min=5.0,
+        measure_timestamp=step_started_at + timedelta(seconds=150),
+        target_temp=25.0,
+        current_temp=25.0,
+        ext_current_temp=17.48,
+        hvac_mode="heat",
+    )
+
+    diagnostics = algo.get_diagnostics()
+    assert diagnostics["deadtime_minutes"] == pytest.approx(1.0)
+    assert diagnostics["deadtime_cycles"] == pytest.approx(0.2)
+    assert diagnostics["last_learning_result"] == "cycle_interrupted"
 
 
 def test_startup_bootstrap_cools_down_immediately_when_temperature_is_at_setpoint() -> None:
