@@ -26,6 +26,7 @@ from .factory import AdaptiveTPIHandlerFactory
 _LOGGER = get_vtherm_logger(__name__)
 VT_DOMAIN = "versatile_thermostat"
 DATA_SKIP_FULL_RELOAD = "skip_full_reload"
+DATA_SKIP_VT_RELOAD_ON_UNLOAD = "skip_vt_reload_on_unload"
 
 
 def _ensure_domain_data(hass: HomeAssistant) -> dict[str, Any]:
@@ -40,6 +41,7 @@ def _active_entry_keys(data: dict[str, Any]) -> list[str]:
         for key in data
         if key not in {DATA_FACTORY_REGISTERED, DATA_SERVICES_REGISTERED}
         and not key.startswith(f"{DATA_SKIP_FULL_RELOAD}_")
+        and not key.startswith(f"{DATA_SKIP_VT_RELOAD_ON_UNLOAD}_")
     ]
 
 
@@ -262,7 +264,9 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
 
 async def _async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload affected VT entries when Adaptive TPI options change."""
-    _ensure_domain_data(hass)[f"{DATA_SKIP_FULL_RELOAD}_{entry.entry_id}"] = True
+    data = _ensure_domain_data(hass)
+    data[f"{DATA_SKIP_FULL_RELOAD}_{entry.entry_id}"] = True
+    data[f"{DATA_SKIP_VT_RELOAD_ON_UNLOAD}_{entry.entry_id}"] = True
     await hass.config_entries.async_reload(entry.entry_id)
 
     target_unique_id = entry.data.get(CONF_TARGET_VTHERM)
@@ -281,6 +285,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _register_factory(hass)
     _register_services(hass)
     skip_full_reload = data.pop(f"{DATA_SKIP_FULL_RELOAD}_{entry.entry_id}", False)
+    data.pop(f"{DATA_SKIP_VT_RELOAD_ON_UNLOAD}_{entry.entry_id}", False)
     if hass.state == CoreState.running and not skip_full_reload:
         await _reload_adaptive_tpi_vtherms(hass)
     return True
@@ -290,6 +295,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a vtherm_adaptive_tpi config entry."""
     data = _ensure_domain_data(hass)
     data.pop(entry.entry_id, None)
+    skip_vt_reload_on_unload = data.pop(
+        f"{DATA_SKIP_VT_RELOAD_ON_UNLOAD}_{entry.entry_id}",
+        False,
+    )
 
     if not _active_entry_keys(data):
         _unregister_factory(hass)
@@ -299,6 +308,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # During HA shutdown, reloading VT entries here can recreate entities before
     # RestoreEntity/recorder have dumped the final requested state, which risks
     # persisting an OFF bootstrap state and restoring OFF at next startup.
-    if hass.state == CoreState.running:
+    if hass.state == CoreState.running and not skip_vt_reload_on_unload:
         await _reload_adaptive_tpi_vtherms(hass)
     return True
