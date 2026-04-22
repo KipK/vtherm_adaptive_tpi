@@ -2038,10 +2038,10 @@ def test_completed_on_cycle_routes_to_a_not_b(monkeypatch: pytest.MonkeyPatch) -
     assert diagnostics["control_samples"] >= 1
 
 
-def test_deadtime_history_keeps_committed_cycle_power(
+def test_deadtime_history_uses_realized_cycle_power(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The deadtime history must keep the cycle-start power captured for that cycle."""
+    """The deadtime history must use the effective power delivered over the cycle."""
     algo = AdaptiveTPIAlgorithm(name="test-deadtime-cycle-power", debug_mode=True)
     recorded_powers: list[float] = []
 
@@ -2081,7 +2081,9 @@ def test_deadtime_history_keeps_committed_cycle_power(
         hvac_mode="heat",
     )
 
-    assert recorded_powers == [pytest.approx(0.8)]
+    diagnostics = algo.get_diagnostics()
+    assert recorded_powers == [pytest.approx(0.2)]
+    assert diagnostics["debug"]["current_cycle_regime"] == "mixed"
     assert algo.on_percent == pytest.approx(0.8)
 
 

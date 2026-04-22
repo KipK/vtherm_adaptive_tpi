@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
 from .adaptive_tpi.controller import compute_on_percent, project_gains
@@ -86,6 +86,19 @@ class AdaptiveTPIAlgorithm:
         self._last_accepted_at: datetime | None = None
         self._temperature_available = False
         self._pending_cycle_sample: CycleSample | None = None
+
+    @staticmethod
+    def _resolve_completed_cycle_sample(
+        sample: CycleSample,
+        e_eff: float | None,
+    ) -> CycleSample:
+        """Return the cycle sample with the actual applied power when known."""
+        if e_eff is None:
+            return sample
+        applied_power = max(0.0, min(1.0, float(e_eff)))
+        if abs(applied_power - sample.applied_power) <= 1e-9:
+            return sample
+        return replace(sample, applied_power=applied_power)
 
     def calculate(
         self,
@@ -237,12 +250,13 @@ class AdaptiveTPIAlgorithm:
             self._state.last_learning_attempt_regime = None
             self.reject_cycle("missing_cycle_context")
             return
+        completed_cycle = self._resolve_completed_cycle_sample(pending_cycle, e_eff)
 
         if elapsed_ratio < 1.0:
             self._state.last_learning_attempt_reason = "cycle_interrupted"
             self._state.last_learning_attempt_regime = None
             self._record_cycle_history(
-                pending_cycle,
+                completed_cycle,
                 cycle_duration_min=cycle_duration_min or 5.0,
                 is_valid=False,
                 is_informative=False,
@@ -263,7 +277,7 @@ class AdaptiveTPIAlgorithm:
             self._state.last_learning_attempt_reason = decision.reason
             self._state.last_learning_attempt_regime = None
             self._record_cycle_history(
-                pending_cycle,
+                completed_cycle,
                 cycle_duration_min=cycle_duration_min or 5.0,
                 is_valid=False,
                 is_informative=False,
@@ -274,22 +288,22 @@ class AdaptiveTPIAlgorithm:
         self._last_accepted_at = self._utc_now()
         self._state.valid_cycles_count += 1
         self._state.accepted_cycles_count += 1
-        self._state.current_cycle_regime = classify_cycle_regime(pending_cycle.applied_power)
+        self._state.current_cycle_regime = classify_cycle_regime(completed_cycle.applied_power)
         self._state.learning_route_selected = "none"
         self._state.learning_route_block_reason = None
         self._state.deadtime_learning_blackout_active = False
         if isinstance(cycle_duration_min, (int, float)):
             self._state.cycle_min_at_last_accepted_cycle = float(cycle_duration_min)
 
-        deadtime_informative = self._is_deadtime_informative_cycle(pending_cycle)
-        estimator_informative = self._is_estimator_informative_cycle(pending_cycle)
+        deadtime_informative = self._is_deadtime_informative_cycle(completed_cycle)
+        estimator_informative = self._is_estimator_informative_cycle(completed_cycle)
 
         if not deadtime_informative and not estimator_informative:
             self._state.last_learning_attempt_reason = "non_informative_cycle"
             self._state.last_learning_attempt_regime = None
             self._state.learning_route_block_reason = "non_informative_cycle"
             self._record_cycle_history(
-                pending_cycle,
+                completed_cycle,
                 cycle_duration_min=cycle_duration_min or 5.0,
                 is_valid=True,
                 is_informative=False,
@@ -309,13 +323,13 @@ class AdaptiveTPIAlgorithm:
         if deadtime_informative:
             self._state.informative_deadtime_cycles_count += 1
         deadtime_result = self._deadtime_model.record_cycle(
-            self._make_deadtime_observation(pending_cycle),
+            self._make_deadtime_observation(completed_cycle),
             cycle_duration_min=cycle_duration_min or 5.0,
             is_valid=True,
             is_informative=deadtime_informative,
             is_estimator_informative=estimator_informative,
-            bootstrap_b_learning_allowed=pending_cycle.bootstrap_b_learning_allowed,
-            mode_sign=hvac_mode_sign(pending_cycle.hvac_mode),
+            bootstrap_b_learning_allowed=completed_cycle.bootstrap_b_learning_allowed,
+            mode_sign=hvac_mode_sign(completed_cycle.hvac_mode),
             track_step_response=False,
         )
         self._apply_deadtime_result(deadtime_result)
@@ -336,11 +350,11 @@ class AdaptiveTPIAlgorithm:
             current_temp=current_temp,
             ext_current_temp=ext_current_temp,
             cycle_duration_min=cycle_duration_min or 5.0,
-            applied_power=pending_cycle.applied_power,
+            applied_power=completed_cycle.applied_power,
         )
         anchored_end_index = len(observations) - 2
 
-        pending_mode_sign = hvac_mode_sign(pending_cycle.hvac_mode)
+        pending_mode_sign = hvac_mode_sign(completed_cycle.hvac_mode)
         if current_cycle_regime == WINDOW_REGIME_OFF:
             self._state.learning_route_selected = "b"
             off_window = build_anchored_learning_window(
