@@ -875,9 +875,15 @@ class AdaptiveTPIAlgorithm:
         current_bootstrap_command_on_percent = (
             self._state.startup_bootstrap_command_on_percent
         )
+        if current_requested_on_percent is None:
+            return False
+        if (
+            current_bootstrap_command_on_percent is not None
+            and abs(current_requested_on_percent - self._state.committed_on_percent) > 1e-9
+        ):
+            return True
         if (
             previous_requested_on_percent is None
-            or current_requested_on_percent is None
             or abs(current_requested_on_percent - previous_requested_on_percent) <= 1e-9
         ):
             return False

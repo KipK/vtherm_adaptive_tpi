@@ -305,7 +305,7 @@ class AdaptiveTPIHandler:
 
     def should_publish_intermediate(self) -> bool:
         """Return True when VT may publish intermediate thermostat states."""
-        return self._should_publish_intermediate
+        return True
 
     @staticmethod
     def _build_storage_key(unique_id: str) -> str:

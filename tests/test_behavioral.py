@@ -560,6 +560,45 @@ def test_startup_bootstrap_detects_mid_cycle_command_flip_after_calculation() ->
     )
 
 
+def test_startup_bootstrap_detects_mid_cycle_command_flip_after_thermostat_recalculate() -> None:
+    """Bootstrap command flips should still restart when thermostat recalculate ran first."""
+    algo = AdaptiveTPIAlgorithm(name="test-startup-bootstrap-command-flip-over-valve")
+
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=20.0,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=19.7,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    algo.update_realized_power(1.0)
+
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=20.0,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+
+    assert algo.requested_on_percent == pytest.approx(0.0)
+    assert algo.startup_bootstrap_command_on_percent == pytest.approx(0.0)
+    assert (
+        algo.should_force_bootstrap_cycle_restart_after_calculation(
+            previous_requested_on_percent=0.0,
+            previous_bootstrap_command_on_percent=0.0,
+        )
+        is True
+    )
+
+
 @pytest.mark.asyncio
 async def test_handler_forces_bootstrap_cycle_restart_on_state_change() -> None:
     """State changes should trigger an immediate forced control pass when bootstrap hits a limit."""
@@ -632,6 +671,36 @@ async def test_handler_forces_immediate_restart_when_bootstrap_changes_command_m
     )
     thermostat.cycle_scheduler.start_cycle.assert_awaited_once_with("heat", 0.0, True)
     assert handler._should_publish_intermediate is True
+
+
+@pytest.mark.asyncio
+async def test_handler_allows_intermediate_publication_during_normal_control_passes() -> None:
+    """Normal control passes should still allow VT to publish updated temperatures."""
+    thermostat = SimpleNamespace(
+        target_temperature=22.5,
+        current_temperature=22.4,
+        current_outdoor_temperature=15.8,
+        last_temperature_slope=0.0,
+        vtherm_hvac_mode="heat",
+        is_overpowering_detected=False,
+        hvac_off_reason=None,
+        cycle_min=5,
+        prop_algorithm=SimpleNamespace(
+            requested_on_percent=0.4,
+            startup_bootstrap_command_on_percent=None,
+            calculate=MagicMock(),
+        ),
+        cycle_scheduler=SimpleNamespace(is_cycle_running=False, start_cycle=AsyncMock()),
+    )
+    handler = object.__new__(AdaptiveTPIHandler)
+    handler._thermostat = thermostat
+    handler._published_diagnostics = {}
+    handler._should_publish_intermediate = False
+
+    await handler.control_heating(force=False)
+
+    thermostat.cycle_scheduler.start_cycle.assert_awaited_once_with("heat", 0.4, False)
+    assert handler.should_publish_intermediate() is True
 
 
 @pytest.mark.asyncio
