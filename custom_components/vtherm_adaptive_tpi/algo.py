@@ -608,6 +608,11 @@ class AdaptiveTPIAlgorithm:
         return self._state.requested_on_percent
 
     @property
+    def startup_bootstrap_command_on_percent(self) -> float | None:
+        """Return the current bootstrap override command when startup bootstrap is active."""
+        return self._state.startup_bootstrap_command_on_percent
+
+    @property
     def calculated_on_percent(self) -> float:
         """Return the raw calculated heating fraction."""
         return self._state.calculated_on_percent
@@ -796,4 +801,26 @@ class AdaptiveTPIAlgorithm:
             deadtime_identification_count=self._state.deadtime_identification_count,
             heating_enabled=sign != 0,
             mode_sign=sign,
+        )
+
+    def should_force_bootstrap_cycle_restart_after_calculation(
+        self,
+        *,
+        previous_requested_on_percent: float | None,
+        previous_bootstrap_command_on_percent: float | None,
+    ) -> bool:
+        """Return True when a bootstrap override changed the command mid-cycle."""
+        current_requested_on_percent = self._state.requested_on_percent
+        current_bootstrap_command_on_percent = (
+            self._state.startup_bootstrap_command_on_percent
+        )
+        if (
+            previous_requested_on_percent is None
+            or current_requested_on_percent is None
+            or abs(current_requested_on_percent - previous_requested_on_percent) <= 1e-9
+        ):
+            return False
+        return (
+            previous_bootstrap_command_on_percent is not None
+            or current_bootstrap_command_on_percent is not None
         )

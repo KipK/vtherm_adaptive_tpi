@@ -115,6 +115,18 @@ class AdaptiveTPIHandler:
         del timestamp
         t = self._thermostat
         self._should_publish_intermediate = force
+        previous_requested_on_percent = (
+            t.prop_algorithm.requested_on_percent
+            if t.prop_algorithm is not None
+            and hasattr(t.prop_algorithm, "requested_on_percent")
+            else None
+        )
+        previous_bootstrap_command_on_percent = (
+            t.prop_algorithm.startup_bootstrap_command_on_percent
+            if t.prop_algorithm is not None
+            and hasattr(t.prop_algorithm, "startup_bootstrap_command_on_percent")
+            else None
+        )
 
         if t.prop_algorithm:
             t.prop_algorithm.calculate(
@@ -127,6 +139,21 @@ class AdaptiveTPIHandler:
                 off_reason=t.hvac_off_reason,
                 cycle_min=t.cycle_min,
             )
+            if (
+                not force
+                and t.cycle_scheduler is not None
+                and getattr(t.cycle_scheduler, "is_cycle_running", False)
+                and hasattr(
+                    t.prop_algorithm,
+                    "should_force_bootstrap_cycle_restart_after_calculation",
+                )
+                and t.prop_algorithm.should_force_bootstrap_cycle_restart_after_calculation(
+                    previous_requested_on_percent=previous_requested_on_percent,
+                    previous_bootstrap_command_on_percent=previous_bootstrap_command_on_percent,
+                )
+            ):
+                force = True
+                self._should_publish_intermediate = True
 
         if t.vtherm_hvac_mode is not None and str(t.vtherm_hvac_mode).lower().endswith("off"):
             if force:
@@ -188,6 +215,7 @@ class AdaptiveTPIHandler:
             current_temp=t.current_temperature,
             hvac_mode=t.vtherm_hvac_mode,
         ):
+            t.recalculate(force=True)
             await t.async_control_heating(force=True)
 
     def on_scheduler_ready(self, scheduler) -> None:
@@ -349,6 +377,7 @@ class AdaptiveTPIHandler:
         t.prop_algorithm.reset_learning()
         await self._async_delete_persisted_state()
         self._refresh_published_diagnostics()
+        t.recalculate(force=True)
         await t.async_control_heating(force=True)
         self.update_attributes()
         t.async_write_ha_state()

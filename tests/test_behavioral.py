@@ -455,6 +455,47 @@ def test_startup_bootstrap_forces_cycle_restart_once_when_reheat_reaches_target(
     )
 
 
+def test_startup_bootstrap_detects_mid_cycle_command_flip_after_calculation() -> None:
+    """Bootstrap command flips should request an immediate restart on sensor refresh."""
+    algo = AdaptiveTPIAlgorithm(name="test-startup-bootstrap-command-flip")
+
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=20.0,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=19.7,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    previous_requested_on_percent = algo.requested_on_percent
+    previous_bootstrap_command_on_percent = algo.startup_bootstrap_command_on_percent
+
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=20.0,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+
+    assert previous_requested_on_percent == pytest.approx(1.0)
+    assert previous_bootstrap_command_on_percent == pytest.approx(1.0)
+    assert algo.requested_on_percent == pytest.approx(0.0)
+    assert (
+        algo.should_force_bootstrap_cycle_restart_after_calculation(
+            previous_requested_on_percent=previous_requested_on_percent,
+            previous_bootstrap_command_on_percent=previous_bootstrap_command_on_percent,
+        )
+        is True
+    )
+
+
 @pytest.mark.asyncio
 async def test_handler_forces_bootstrap_cycle_restart_on_state_change() -> None:
     """State changes should trigger an immediate forced control pass when bootstrap hits a limit."""
@@ -466,6 +507,7 @@ async def test_handler_forces_bootstrap_cycle_restart_on_state_change() -> None:
         target_temperature=20.0,
         current_temperature=19.7,
         vtherm_hvac_mode="heat",
+        recalculate=MagicMock(),
         async_control_heating=AsyncMock(),
     )
     handler = object.__new__(AdaptiveTPIHandler)
@@ -478,7 +520,54 @@ async def test_handler_forces_bootstrap_cycle_restart_on_state_change() -> None:
         current_temp=19.7,
         hvac_mode="heat",
     )
+    thermostat.recalculate.assert_called_once_with(force=True)
     thermostat.async_control_heating.assert_awaited_once_with(force=True)
+
+
+@pytest.mark.asyncio
+async def test_handler_forces_immediate_restart_when_bootstrap_changes_command_mid_cycle() -> None:
+    """Temperature refreshes should force the scheduler when bootstrap flips the command."""
+    thermostat = SimpleNamespace(
+        target_temperature=22.5,
+        current_temperature=22.5,
+        current_outdoor_temperature=15.8,
+        last_temperature_slope=0.0,
+        vtherm_hvac_mode="heat",
+        is_overpowering_detected=False,
+        hvac_off_reason=None,
+        cycle_min=5,
+        prop_algorithm=SimpleNamespace(
+            requested_on_percent=1.0,
+            startup_bootstrap_command_on_percent=1.0,
+            calculate=MagicMock(),
+            get_diagnostics=MagicMock(
+                return_value={"startup_sequence_stage": "cooldown_below_target"}
+            ),
+            should_force_bootstrap_cycle_restart_after_calculation=MagicMock(
+                return_value=True
+            ),
+        ),
+        cycle_scheduler=SimpleNamespace(is_cycle_running=True, start_cycle=AsyncMock()),
+    )
+    handler = object.__new__(AdaptiveTPIHandler)
+    handler._thermostat = thermostat
+    handler._published_diagnostics = {}
+    handler._should_publish_intermediate = False
+
+    def _flip_bootstrap_command(*_args, **_kwargs) -> None:
+        thermostat.prop_algorithm.requested_on_percent = 0.0
+        thermostat.prop_algorithm.startup_bootstrap_command_on_percent = 0.0
+
+    thermostat.prop_algorithm.calculate.side_effect = _flip_bootstrap_command
+
+    await handler.control_heating(force=False)
+
+    thermostat.prop_algorithm.should_force_bootstrap_cycle_restart_after_calculation.assert_called_once_with(
+        previous_requested_on_percent=1.0,
+        previous_bootstrap_command_on_percent=1.0,
+    )
+    thermostat.cycle_scheduler.start_cycle.assert_awaited_once_with("heat", 0.0, True)
+    assert handler._should_publish_intermediate is True
 
 
 @pytest.mark.asyncio
@@ -510,6 +599,32 @@ async def test_handler_refreshes_diagnostics_after_forced_control_pass() -> None
     thermostat.prop_algorithm.calculate.assert_called_once()
     thermostat.cycle_scheduler.start_cycle.assert_awaited_once_with("heat", 0.0, True)
     assert handler._published_diagnostics == {"startup_sequence_stage": "completed"}
+
+
+@pytest.mark.asyncio
+async def test_service_reset_learning_recalculates_before_forced_control() -> None:
+    """Learning reset should realign thermostat-side state before forcing cycle control."""
+    thermostat = SimpleNamespace(
+        prop_algorithm=SimpleNamespace(reset_learning=MagicMock()),
+        recalculate=MagicMock(),
+        async_control_heating=AsyncMock(),
+        async_write_ha_state=MagicMock(),
+    )
+    handler = object.__new__(AdaptiveTPIHandler)
+    handler._thermostat = thermostat
+    handler._async_delete_persisted_state = AsyncMock()
+    handler._refresh_published_diagnostics = MagicMock()
+    handler.update_attributes = MagicMock()
+
+    await handler.service_reset_learning()
+
+    thermostat.prop_algorithm.reset_learning.assert_called_once_with()
+    handler._async_delete_persisted_state.assert_awaited_once_with()
+    handler._refresh_published_diagnostics.assert_called_once_with()
+    thermostat.recalculate.assert_called_once_with(force=True)
+    thermostat.async_control_heating.assert_awaited_once_with(force=True)
+    handler.update_attributes.assert_called_once_with()
+    thermostat.async_write_ha_state.assert_called_once_with()
 
 
 def test_diagnostics_expose_normalized_units_when_cycle_duration_is_known() -> None:
