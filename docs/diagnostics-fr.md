@@ -41,7 +41,7 @@ Ce sont les gains projetés actuellement utilisés par le contrôleur.
 Interprétation :
 
 - `deadtime_cycles` est l'estimation actuelle du temps mort en cycles de l'ordonnanceur
-- `deadtime_minutes` est l'estimation mesurée du temps mort en minutes avant conversion en cycles
+- `deadtime_minutes` est la valeur mesurée du temps mort en minutes attachée à l'estimation `deadtime_cycles` retenue
 - si aucune valeur mesurée en minutes n'est encore disponible, `deadtime_minutes` revient à la valeur normalisée construite depuis `deadtime_cycles` et la dernière durée de cycle acceptée
 - `deadtime_confidence` est la confiance dans cette estimation, dans `[0, 1]`
 
@@ -146,7 +146,7 @@ Ce mappage conserve les noms orientés implémentation utilisés par l'algorithm
   - `nd_hat`
   - `nd_hat_cycles`
   - `deadtime_min`
-- `deadtime_min` suit la même règle "minutes mesurées d'abord" que `deadtime_minutes`
+- `deadtime_min` suit la même règle de minute attachée au temps mort retenu que `deadtime_minutes`
   - `c_nd`
   - `deadtime_identification_count`
   - `deadtime_identification_qualities`

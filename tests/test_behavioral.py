@@ -801,6 +801,41 @@ def test_deadtime_model_locks_after_consistent_identifications() -> None:
     assert result.best_candidate_b == pytest.approx(0.03)
 
 
+def test_deadtime_model_keeps_minutes_from_selected_deadtime() -> None:
+    """The published minute value must stay attached to the selected deadtime."""
+    model = DeadtimeModel()
+    model._identifications.extend(
+        (
+            StepIdentification(
+                nd_cycles=1.0,
+                nd_minutes=9.0,
+                quality=0.3,
+                b_proxy=0.02,
+                cycle_index=0,
+            ),
+            StepIdentification(
+                nd_cycles=2.0,
+                nd_minutes=5.0,
+                quality=0.3,
+                b_proxy=0.03,
+                cycle_index=1,
+            ),
+            StepIdentification(
+                nd_cycles=3.0,
+                nd_minutes=6.0,
+                quality=0.4,
+                b_proxy=0.04,
+                cycle_index=2,
+            ),
+        )
+    )
+
+    result = model._recompute_nd_hat()
+
+    assert result.nd_hat == pytest.approx(2.0)
+    assert result.nd_minutes == pytest.approx(5.0)
+
+
 def test_deadtime_model_locks_on_single_clean_identification() -> None:
     """A single high-quality identification must be enough to lock."""
     model = DeadtimeModel()

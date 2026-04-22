@@ -42,7 +42,7 @@ These are the projected gains currently used by the controller.
 Interpretation:
 
 - `deadtime_cycles` is the current deadtime estimate in scheduler cycles
-- `deadtime_minutes` is the measured deadtime estimate in minutes before conversion to cycles
+- `deadtime_minutes` is the measured deadtime in minutes attached to the selected `deadtime_cycles` estimate
 - when no measured minute value is available yet, `deadtime_minutes` falls back to the normalized value built from `deadtime_cycles` and the last accepted cycle duration
 - `deadtime_confidence` is the confidence in that estimate, in `[0, 1]`
 
@@ -148,7 +148,7 @@ This mapping keeps the implementation-oriented names used by the algorithm.
   - `nd_hat`
   - `nd_hat_cycles`
   - `deadtime_min`
-- `deadtime_min` follows the same measured-minutes-first rule as `deadtime_minutes`
+- `deadtime_min` follows the same selected-deadtime minute rule as `deadtime_minutes`
   - `c_nd`
   - `deadtime_identification_count`
   - `deadtime_identification_qualities`

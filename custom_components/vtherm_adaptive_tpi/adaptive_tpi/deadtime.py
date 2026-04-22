@@ -108,6 +108,31 @@ def _weighted_median(values: list[float], weights: list[float]) -> float:
     return sorted_pairs[-1][0]
 
 
+def _select_identification_for_nd_hat(
+    identifications: list[StepIdentification],
+    nd_hat: float,
+) -> StepIdentification | None:
+    """Return the identification that produced the selected deadtime in cycles."""
+    if not identifications:
+        return None
+
+    total_quality = sum(ident.quality for ident in identifications)
+    sorted_identifications = sorted(identifications, key=lambda ident: ident.nd_cycles)
+    if total_quality > 0.0:
+        cumulative = 0.0
+        threshold = total_quality / 2.0
+        for ident in sorted_identifications:
+            cumulative += ident.quality
+            if cumulative >= threshold:
+                return ident
+        return sorted_identifications[-1]
+
+    return min(
+        sorted_identifications,
+        key=lambda ident: (abs(ident.nd_cycles - nd_hat), -ident.quality),
+    )
+
+
 def _find_latest_step(
     observations: tuple[CycleHistoryEntry, ...],
     last_processed_step_index: int,
@@ -374,17 +399,13 @@ class DeadtimeModel:
         nd_values = [ident.nd_cycles for ident in self._identifications]
         qualities = [ident.quality for ident in self._identifications]
         nd_hat = _weighted_median(nd_values, qualities)
-        minute_pairs = [
-            (ident.nd_minutes, ident.quality)
-            for ident in self._identifications
-            if ident.nd_minutes is not None
-        ]
+        selected_identification = _select_identification_for_nd_hat(
+            list(self._identifications),
+            nd_hat,
+        )
         nd_minutes = (
-            _weighted_median(
-                [float(minutes) for minutes, _ in minute_pairs],
-                [weight for _, weight in minute_pairs],
-            )
-            if minute_pairs
+            selected_identification.nd_minutes
+            if selected_identification is not None
             else None
         )
 
