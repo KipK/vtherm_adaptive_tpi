@@ -947,6 +947,8 @@ def test_estimator_can_seed_b_from_deadtime_proxy() -> None:
 
     update = estimator.seed_b_from_deadtime_proxy(0.03)
 
+    assert update.updated is True
+    assert update.b_updated is True
     assert update.b_hat == pytest.approx(0.03)
     assert update.b_samples_count == 1
     assert update.b_last_reason == "b_seeded_from_deadtime"

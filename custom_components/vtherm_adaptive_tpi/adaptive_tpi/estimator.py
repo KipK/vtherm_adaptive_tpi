@@ -269,7 +269,7 @@ class ParameterEstimator:
         self.b_hat = self._b_estimator.estimate
         self.c_b = self._b_estimator.confidence
         self.b_converged = self._compute_b_converged()
-        return self._snapshot(i_a=0.0, i_b=0.0, a_updated=False, b_updated=False)
+        return self._snapshot(i_a=0.0, i_b=0.0, a_updated=False, b_updated=True)
 
     def update_a(
         self,
