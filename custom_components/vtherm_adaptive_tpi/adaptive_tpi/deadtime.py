@@ -46,6 +46,12 @@ class DeadtimeObservation:
     tout: float
     target_temp: float
     applied_power: float
+    applied_demand: float | None = None
+
+    def __post_init__(self) -> None:
+        """Keep old callers in the linear actuator space."""
+        if self.applied_demand is None:
+            self.applied_demand = self.applied_power
 
 
 @dataclass(slots=True)
@@ -61,6 +67,12 @@ class CycleHistoryEntry:
     is_estimator_informative: bool
     bootstrap_b_learning_allowed: bool = False
     cycle_duration_min: float = 5.0
+    applied_demand: float | None = None
+
+    def __post_init__(self) -> None:
+        """Keep old tests and persisted runtime history deterministic."""
+        if self.applied_demand is None:
+            self.applied_demand = self.applied_power
 
 
 @dataclass(slots=True)
@@ -143,9 +155,9 @@ def _find_latest_step(
         if step_index <= last_processed_step_index:
             break
 
-        if observations[step_index].applied_power < STEP_POWER_MIN_NEW:
+        if observations[step_index].applied_demand < STEP_POWER_MIN_NEW:
             continue
-        if observations[step_index - 1].applied_power > OFF_POWER_MAX_NEW:
+        if observations[step_index - 1].applied_demand > OFF_POWER_MAX_NEW:
             continue
 
         return step_index
@@ -172,7 +184,7 @@ def _measure_rise_delay(
         i = step_index + n_cycles
         entry = observations[i]
 
-        if entry.applied_power < STEP_ABORT_POWER_NEW:
+        if entry.applied_demand < STEP_ABORT_POWER_NEW:
             return _RESPONSE_ABORTED
 
         if abs(entry.target_temp - observations[i - 1].target_temp) > MAX_SETPOINT_JUMP:
@@ -186,13 +198,13 @@ def _measure_rise_delay(
 
         if rise_detected or ceiling_hit:
             on_powers = [
-                observations[step_index + j].applied_power
+                observations[step_index + j].applied_demand
                 for j in range(n_cycles + 1)
             ]
             q_power = min(1.0, sum(on_powers) / max(len(on_powers), 1))
             q_edge = (
                 1.0
-                if observations[step_index - 1].applied_power <= OFF_POWER_CLEAN
+                if observations[step_index - 1].applied_demand <= OFF_POWER_CLEAN
                 else 0.7
             )
             quality = q_power * q_edge
@@ -274,6 +286,7 @@ class DeadtimeModel:
                 tout=e.tout,
                 target_temp=e.target_temp,
                 applied_power=e.applied_power,
+                applied_demand=e.applied_demand,
             )
             for e in self._cycle_history
             if e.is_informative
@@ -338,6 +351,7 @@ class DeadtimeModel:
                 tout=observation.tout,
                 target_temp=observation.target_temp,
                 applied_power=observation.applied_power,
+                applied_demand=observation.applied_demand,
                 cycle_duration_min=cycle_duration_min,
                 is_valid=is_valid,
                 is_informative=is_informative,

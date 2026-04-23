@@ -93,6 +93,8 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
         "adaptive_phase": _public_phase_name(state.bootstrap_phase),
         "gain_indoor": state.k_int,
         "gain_outdoor": state.k_ext,
+        "actuator_mode": state.actuator_mode,
+        "valve_curve_params": state.valve_curve_params,
         "current_cycle_percent": state.committed_on_percent,
         "next_cycle_percent": state.requested_on_percent,
         "deadtime_cycles": state.nd_hat,
@@ -192,5 +194,7 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
             "calculated_on_percent": state.calculated_on_percent,
             "requested_on_percent": state.requested_on_percent,
             "committed_on_percent": state.committed_on_percent,
+            "actuator_mode": state.actuator_mode,
+            "valve_curve_params": state.valve_curve_params,
         }
     return data

@@ -28,7 +28,15 @@ from .adaptive_tpi.startup_bootstrap import (
 from .adaptive_tpi.mode import hvac_mode_sign
 from .adaptive_tpi.state import AdaptiveTPIState
 from .adaptive_tpi.supervisor import AdaptiveTPISupervisor, PHASE_A, PHASE_B
-from .const import DEFAULT_KEXT, DEFAULT_KINT, DEFAULT_RESPONSIVENESS, RESPONSIVENESS_TO_TAU_CL_MIN
+from .adaptive_tpi.valve_curve import build_valve_curve
+from .const import (
+    ACTUATOR_MODE_VALVE,
+    ACTUATOR_MODE_SWITCH,
+    DEFAULT_KEXT,
+    DEFAULT_KINT,
+    DEFAULT_RESPONSIVENESS,
+    RESPONSIVENESS_TO_TAU_CL_MIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 _CONFIDENCE_DECAY_30_DAYS = 30
@@ -50,6 +58,12 @@ class CycleSample:
     applied_power: float
     hvac_mode: Any
     bootstrap_b_learning_allowed: bool = False
+    applied_demand: float | None = None
+
+    def __post_init__(self) -> None:
+        """Keep linear-actuator callers deterministic."""
+        if self.applied_demand is None:
+            self.applied_demand = self.applied_power
 
 
 class AdaptiveTPIAlgorithm:
@@ -63,6 +77,7 @@ class AdaptiveTPIAlgorithm:
         responsiveness: int = DEFAULT_RESPONSIVENESS,
         default_kint: float = DEFAULT_KINT,
         default_kext: float = DEFAULT_KEXT,
+        actuator_mode: str = ACTUATOR_MODE_SWITCH,
     ) -> None:
         """Initialize the algorithm scaffold."""
         self._name = name
@@ -72,10 +87,13 @@ class AdaptiveTPIAlgorithm:
         self._tau_cl_min: float = RESPONSIVENESS_TO_TAU_CL_MIN[idx]
         self._default_kint = default_kint
         self._default_kext = default_kext
+        self._actuator_mode = actuator_mode
+        self._valve_curve = build_valve_curve(actuator_mode)
         self._state = AdaptiveTPIState(
             k_int=default_kint,
             k_ext=default_kext,
         )
+        self._refresh_valve_curve_state()
         self._supervisor = AdaptiveTPISupervisor(phase=self._state.bootstrap_phase)
         self._deadtime_model = DeadtimeModel()
         self._deadtime_tracker = DeadtimeTracker(now_provider=self._utc_now)
@@ -87,8 +105,8 @@ class AdaptiveTPIAlgorithm:
         self._temperature_available = False
         self._pending_cycle_sample: CycleSample | None = None
 
-    @staticmethod
     def _resolve_completed_cycle_sample(
+        self,
         sample: CycleSample,
         e_eff: float | None,
     ) -> CycleSample:
@@ -98,7 +116,7 @@ class AdaptiveTPIAlgorithm:
         applied_power = max(0.0, min(1.0, float(e_eff)))
         if abs(applied_power - sample.applied_power) <= 1e-9:
             return sample
-        return replace(sample, applied_power=applied_power)
+        return replace(sample, applied_power=applied_power, applied_demand=applied_power)
 
     def calculate(
         self,
@@ -187,6 +205,7 @@ class AdaptiveTPIAlgorithm:
         self._state.last_cycle_started_at = self._utc_now().isoformat()
         previous_committed_on_percent = self._state.committed_on_percent
         self.update_realized_power(on_percent)
+        applied_demand = self._state.committed_on_percent
         if target_temp is None or current_temp is None or ext_current_temp is None:
             self._pending_cycle_sample = None
             return
@@ -214,8 +233,9 @@ class AdaptiveTPIAlgorithm:
             bootstrap_b_learning_allowed=(
                 self._state.startup_bootstrap_active
                 and self._state.startup_bootstrap_stage == STARTUP_BOOTSTRAP_COOLDOWN
-                and classify_cycle_regime(self._state.committed_on_percent) == WINDOW_REGIME_OFF
+                and classify_cycle_regime(applied_demand) == WINDOW_REGIME_OFF
             ),
+            applied_demand=applied_demand,
         )
 
     def on_cycle_completed(
@@ -288,7 +308,7 @@ class AdaptiveTPIAlgorithm:
         self._last_accepted_at = self._utc_now()
         self._state.valid_cycles_count += 1
         self._state.accepted_cycles_count += 1
-        self._state.current_cycle_regime = classify_cycle_regime(completed_cycle.applied_power)
+        self._state.current_cycle_regime = classify_cycle_regime(completed_cycle.applied_demand)
         self._state.learning_route_selected = "none"
         self._state.learning_route_block_reason = None
         self._state.deadtime_learning_blackout_active = False
@@ -351,6 +371,7 @@ class AdaptiveTPIAlgorithm:
             ext_current_temp=ext_current_temp,
             cycle_duration_min=cycle_duration_min or 5.0,
             applied_power=completed_cycle.applied_power,
+            applied_demand=completed_cycle.applied_demand,
         )
         anchored_end_index = len(observations) - 2
 
@@ -455,6 +476,7 @@ class AdaptiveTPIAlgorithm:
             **self._state.to_persisted_dict(),
             "deadtime_model": self._deadtime_model.to_persisted_dict(),
             "estimator_model": self._estimator.to_persisted_dict(),
+            "valve_curve": self._valve_curve.to_persisted_dict(),
         }
 
     def reset_learning(self) -> None:
@@ -463,6 +485,8 @@ class AdaptiveTPIAlgorithm:
             k_int=self._default_kint,
             k_ext=self._default_kext,
         )
+        self._valve_curve = build_valve_curve(self._actuator_mode)
+        self._refresh_valve_curve_state()
         self._supervisor.reset()
         self._deadtime_model.reset()
         self._deadtime_tracker.reset()
@@ -531,6 +555,10 @@ class AdaptiveTPIAlgorithm:
                     c_a=self._state.c_a,
                     c_b=self._state.c_b,
                 )
+            if not self._valve_curve.load_persisted_dict(data.get("valve_curve")):
+                persisted_curve = data.get("valve_curve")
+                if isinstance(persisted_curve, Mapping) and persisted_curve.get("actuator_mode"):
+                    self._supervisor.last_freeze_reason = "actuator_mode_changed"
             if should_restore_deadtime:
                 deadtime_result = self._deadtime_model.last_result
                 self._state.nd_hat = deadtime_result.nd_hat
@@ -556,6 +584,7 @@ class AdaptiveTPIAlgorithm:
             self._state.b_dispersion = self._estimator._b_estimator.dispersion
             self._supervisor.set_phase(self._state.bootstrap_phase)
             self._supervisor.apply_to_state(self._state)
+            self._refresh_valve_curve_state()
             self._refresh_projected_gains()
         except (AttributeError, TypeError, ValueError) as err:
             _LOGGER.warning(
@@ -786,6 +815,7 @@ class AdaptiveTPIAlgorithm:
             tout=sample.outdoor_temp,
             target_temp=sample.target_temp,
             applied_power=sample.applied_power,
+            applied_demand=sample.applied_demand,
         )
 
     def _learning_observations_with_terminal(
@@ -796,6 +826,7 @@ class AdaptiveTPIAlgorithm:
         ext_current_temp: float | None,
         cycle_duration_min: float,
         applied_power: float,
+        applied_demand: float,
     ) -> tuple[CycleHistoryEntry, ...]:
         """Return the stored cycle history plus the current cycle end point."""
         if target_temp is None or current_temp is None or ext_current_temp is None:
@@ -805,6 +836,7 @@ class AdaptiveTPIAlgorithm:
             tout=float(ext_current_temp),
             target_temp=float(target_temp),
             applied_power=float(applied_power),
+            applied_demand=float(applied_demand),
             is_valid=True,
             is_informative=False,
             is_estimator_informative=False,
@@ -831,6 +863,21 @@ class AdaptiveTPIAlgorithm:
             bootstrap_b_learning_allowed=sample.bootstrap_b_learning_allowed,
             mode_sign=hvac_mode_sign(sample.hvac_mode),
             track_step_response=False,
+        )
+
+    def _refresh_valve_curve_state(self) -> None:
+        """Copy actuator linearization status into diagnostics state."""
+        self._state.actuator_mode = self._actuator_mode
+        params = self._valve_curve.params
+        self._state.valve_curve_params = (
+            None
+            if params is None
+            else {
+                "min_valve": params.min_valve,
+                "knee_demand": params.knee_demand,
+                "knee_valve": params.knee_valve,
+                "max_valve": params.max_valve,
+            }
         )
 
     def _refresh_projected_gains(self) -> None:

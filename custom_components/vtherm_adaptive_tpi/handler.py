@@ -14,18 +14,25 @@ from homeassistant.helpers.storage import Store
 from .algo import AdaptiveTPIAlgorithm
 from .adaptive_tpi.state import PERSISTENCE_SCHEMA_VERSION
 from .const import (
+    ACTUATOR_MODE_SWITCH,
+    ACTUATOR_MODE_VALVE,
+    AUTO_REGULATION_VALVE,
     CONF_ADAPTIVE_TPI_DEBUG,
+    CONF_AUTO_REGULATION_MODE_KEY,
     CONF_DEFAULT_KEXT,
     CONF_DEFAULT_KINT,
     CONF_MINIMAL_ACTIVATION_DELAY,
     CONF_MINIMAL_DEACTIVATION_DELAY,
     CONF_RESPONSIVENESS,
     CONF_TARGET_VTHERM,
+    CONF_THERMOSTAT_TYPE_KEY,
     DEFAULT_KEXT,
     DEFAULT_KINT,
     DEFAULT_OPTIONS,
     DEFAULT_RESPONSIVENESS,
     DOMAIN,
+    THERMOSTAT_TYPE_CLIMATE,
+    THERMOSTAT_TYPE_VALVE,
 )
 
 if TYPE_CHECKING:
@@ -33,6 +40,22 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 _STORAGE_KEY_PREFIX = f"{DOMAIN}.state"
+
+
+def _resolve_actuator_mode(entry_infos: dict | None) -> str:
+    """Resolve the actuator command space from VTherm entry metadata."""
+    if not isinstance(entry_infos, dict):
+        return ACTUATOR_MODE_SWITCH
+    thermostat_type = entry_infos.get(CONF_THERMOSTAT_TYPE_KEY)
+    auto_regulation_mode = entry_infos.get(CONF_AUTO_REGULATION_MODE_KEY)
+    if thermostat_type == THERMOSTAT_TYPE_VALVE:
+        return ACTUATOR_MODE_VALVE
+    if (
+        thermostat_type == THERMOSTAT_TYPE_CLIMATE
+        and auto_regulation_mode == AUTO_REGULATION_VALVE
+    ):
+        return ACTUATOR_MODE_VALVE
+    return ACTUATOR_MODE_SWITCH
 
 
 class AdaptiveTPIHandler:
@@ -67,6 +90,7 @@ class AdaptiveTPIHandler:
             responsiveness=int(entry.get(CONF_RESPONSIVENESS, DEFAULT_RESPONSIVENESS)),
             default_kint=float(entry.get(CONF_DEFAULT_KINT, DEFAULT_KINT)),
             default_kext=float(entry.get(CONF_DEFAULT_KEXT, DEFAULT_KEXT)),
+            actuator_mode=_resolve_actuator_mode(t.entry_infos or {}),
         )
         self._refresh_published_diagnostics()
 

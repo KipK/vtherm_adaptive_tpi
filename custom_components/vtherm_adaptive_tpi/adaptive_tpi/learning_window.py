@@ -141,7 +141,7 @@ def build_anchored_learning_window(
         previous = observations[start_index - 1]
         if not _can_feed_estimator(previous, regime):
             break
-        previous_regime = classify_cycle_regime(previous.applied_power)
+        previous_regime = classify_cycle_regime(previous.applied_demand)
         if previous_regime != regime and previous_regime != WINDOW_REGIME_MIXED:
             break
         next_duration = total_duration_min + _duration_minutes(previous)
@@ -227,7 +227,7 @@ def build_anchored_learning_window(
         delayed_index = index - floor(max(nd_hat, 0.0))
         if delayed_index < 0:
             continue
-        delayed_powers.append(observations[delayed_index].applied_power)
+        delayed_powers.append(observations[delayed_index].applied_demand)
 
     if regime == WINDOW_REGIME_ON and not delayed_powers:
         return LearningWindowResult(
@@ -239,7 +239,7 @@ def build_anchored_learning_window(
     u_eff = (
         sum(delayed_powers) / len(delayed_powers)
         if delayed_powers
-        else sum(entry.applied_power for entry in cycle_slice) / len(cycle_slice)
+        else sum(entry.applied_demand for entry in cycle_slice) / len(cycle_slice)
     )
     delta_out = sum(entry.tin - entry.tout for entry in cycle_slice) / len(cycle_slice)
     setpoint_error = sum(abs(entry.target_temp - entry.tin) for entry in cycle_slice) / len(cycle_slice)
@@ -283,7 +283,7 @@ def _find_latest_candidate_end(
 
 
 def _matches_regime(entry: CycleHistoryEntry, regime: str) -> bool:
-    return classify_cycle_regime(entry.applied_power) == regime
+    return classify_cycle_regime(entry.applied_demand) == regime
 
 
 def _duration_minutes(entry: CycleHistoryEntry) -> float:
@@ -369,7 +369,7 @@ def _safe_window_start_after_recent_regime_transition(
     latest_opposite_index: int | None = None
 
     for index in range(end_index, -1, -1):
-        current_regime = classify_cycle_regime(observations[index].applied_power)
+        current_regime = classify_cycle_regime(observations[index].applied_demand)
         if current_regime == WINDOW_REGIME_MIXED:
             continue
         if current_regime == regime:

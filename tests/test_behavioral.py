@@ -10,11 +10,24 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from custom_components.vtherm_adaptive_tpi.algo import AdaptiveTPIAlgorithm
+from custom_components.vtherm_adaptive_tpi.const import (
+    ACTUATOR_MODE_SWITCH,
+    ACTUATOR_MODE_VALVE,
+)
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.controller import (
     compute_gain_targets,
     project_gains,
 )
-from custom_components.vtherm_adaptive_tpi.handler import AdaptiveTPIHandler
+from custom_components.vtherm_adaptive_tpi.handler import (
+    AdaptiveTPIHandler,
+    _resolve_actuator_mode,
+)
+from custom_components.vtherm_adaptive_tpi.adaptive_tpi.valve_curve import (
+    IdentityValveCurve,
+    TwoSlopeValveCurve,
+    VALVE_CURVE_DEFAULTS,
+    ValveCurveParams,
+)
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.deadtime import (
     CONFIDENCE_LOCK_THRESHOLD,
     N_MAX_RISE_CYCLES,
@@ -90,6 +103,75 @@ def _make_step_observations(
         tin = tin + a * delayed_power - b * (tin - tout)
 
     return tuple(entries)
+
+
+def test_resolve_actuator_mode_from_entry_infos() -> None:
+    """Actuator mode follows VTherm metadata."""
+    assert _resolve_actuator_mode(None) == ACTUATOR_MODE_SWITCH
+    assert (
+        _resolve_actuator_mode({"thermostat_type": "thermostat_over_switch"})
+        == ACTUATOR_MODE_SWITCH
+    )
+    assert (
+        _resolve_actuator_mode({"thermostat_type": "thermostat_over_valve"})
+        == ACTUATOR_MODE_VALVE
+    )
+    assert (
+        _resolve_actuator_mode(
+            {
+                "thermostat_type": "thermostat_over_climate",
+                "auto_regulation_mode": "auto_regulation_valve",
+            }
+        )
+        == ACTUATOR_MODE_VALVE
+    )
+
+
+def test_identity_valve_curve_is_strictly_linear() -> None:
+    """Switch actuators keep the existing linear command space."""
+    curve = IdentityValveCurve()
+    for value in (-0.5, 0.0, 0.42, 1.0, 1.5):
+        expected = min(1.0, max(0.0, value))
+        assert curve.apply(value) == pytest.approx(expected)
+        assert curve.invert(value) == pytest.approx(expected)
+
+
+def test_two_slope_valve_curve_round_trips_reachable_points() -> None:
+    """Reachable valve positions invert back to the model demand."""
+    curve = TwoSlopeValveCurve(VALVE_CURVE_DEFAULTS)
+    assert curve.apply(0.06) == pytest.approx(0.0)
+    assert curve.apply(0.07) == pytest.approx(0.077)
+    assert curve.apply(0.80) == pytest.approx(0.15)
+    assert curve.apply(1.0) == pytest.approx(1.0)
+    for demand in (0.07, 0.20, 0.80, 0.95, 1.0):
+        assert curve.invert(curve.apply(demand)) == pytest.approx(demand)
+
+
+def test_two_slope_valve_curve_rejects_invalid_parameters() -> None:
+    """Invalid curve breakpoints must not be accepted."""
+    with pytest.raises(ValueError):
+        ValveCurveParams(
+            min_valve=15.0,
+            knee_demand=80.0,
+            knee_valve=7.0,
+            max_valve=100.0,
+        )
+
+
+def test_valve_mode_keeps_runtime_command_identity_for_now() -> None:
+    """Valve mode scaffolding must not change VT command semantics yet."""
+    algo = AdaptiveTPIAlgorithm(
+        name="test-valve-command-identity",
+        actuator_mode=ACTUATOR_MODE_VALVE,
+    )
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=19.5,
+        ext_current_temp=10.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    assert algo.requested_on_percent == pytest.approx(algo.calculated_on_percent)
 
 
 def test_startup_with_no_history_keeps_bootstrap_defaults() -> None:
@@ -844,6 +926,33 @@ def test_step_detection_ignores_no_off_period() -> None:
     assert step_index is None
 
 
+def test_step_detection_uses_applied_demand() -> None:
+    """Deadtime step detection must use the model-space command."""
+    observations = (
+        CycleHistoryEntry(
+            tin=19.0,
+            tout=10.0,
+            target_temp=21.0,
+            applied_power=0.0,
+            applied_demand=0.0,
+            is_valid=True,
+            is_informative=True,
+            is_estimator_informative=True,
+        ),
+        CycleHistoryEntry(
+            tin=19.0,
+            tout=10.0,
+            target_temp=21.0,
+            applied_power=0.12,
+            applied_demand=0.65,
+            is_valid=True,
+            is_informative=True,
+            is_estimator_informative=True,
+        ),
+    )
+    assert _find_latest_step(observations, last_processed_step_index=-1) == 1
+
+
 def test_rise_delay_detects_rise() -> None:
     """_measure_rise_delay must return a StepIdentification when a rise is detected."""
     observations = _make_step_observations(nd=2, n_off=4)
@@ -1238,6 +1347,78 @@ def test_estimator_can_seed_b_from_deadtime_proxy() -> None:
     assert update.b_samples_count == 1
     assert update.b_last_reason == "b_seeded_from_deadtime"
     assert update.i_b == pytest.approx(0.0)
+
+
+def test_learning_window_uses_applied_demand_for_regime_and_u_eff() -> None:
+    """Learning windows must consume model-space demand, not actuator position."""
+    observations = (
+        CycleHistoryEntry(
+            tin=19.0,
+            tout=10.0,
+            target_temp=21.0,
+            applied_power=0.12,
+            applied_demand=0.50,
+            is_valid=True,
+            is_informative=True,
+            is_estimator_informative=True,
+            cycle_duration_min=10.0,
+        ),
+        CycleHistoryEntry(
+            tin=19.2,
+            tout=10.0,
+            target_temp=21.0,
+            applied_power=0.12,
+            applied_demand=0.50,
+            is_valid=True,
+            is_informative=False,
+            is_estimator_informative=False,
+            cycle_duration_min=10.0,
+        ),
+    )
+    result = build_anchored_learning_window(
+        observations,
+        nd_hat=0.0,
+        regime=WINDOW_REGIME_ON,
+        end_index=0,
+    )
+    assert result.sample is not None
+    assert result.sample.u_eff == pytest.approx(0.50)
+
+
+def test_learning_window_rejects_on_window_when_applied_demand_is_low() -> None:
+    """A low model-space demand remains OFF even if the raw actuator value differs."""
+    observations = (
+        CycleHistoryEntry(
+            tin=19.0,
+            tout=10.0,
+            target_temp=21.0,
+            applied_power=0.50,
+            applied_demand=0.05,
+            is_valid=True,
+            is_informative=True,
+            is_estimator_informative=True,
+            cycle_duration_min=10.0,
+        ),
+        CycleHistoryEntry(
+            tin=19.2,
+            tout=10.0,
+            target_temp=21.0,
+            applied_power=0.50,
+            applied_demand=0.05,
+            is_valid=True,
+            is_informative=False,
+            is_estimator_informative=False,
+            cycle_duration_min=10.0,
+        ),
+    )
+    result = build_anchored_learning_window(
+        observations,
+        nd_hat=0.0,
+        regime=WINDOW_REGIME_ON,
+        end_index=0,
+    )
+    assert result.sample is None
+    assert result.reason == "on_window_anchor_regime_mismatch"
 
 
 def test_learning_window_can_extend_across_multiple_off_cycles() -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-PERSISTENCE_SCHEMA_VERSION = 1
+PERSISTENCE_SCHEMA_VERSION = 2
 DEFAULT_BOOTSTRAP_PHASE = "startup"
 
 
@@ -108,6 +108,8 @@ class AdaptiveTPIState:
     deadtime_identification_count: int = 0
     deadtime_identification_qualities: dict[str, float] = field(default_factory=dict)
     deadtime_pending_step: bool = False
+    actuator_mode: str = "switch"
+    valve_curve_params: dict[str, float] | None = None
     # These routing diagnostics describe the latest runtime decision only.
     # They are intentionally kept out of persistence so restarts do not restore
     # stale branch-selection information as if it were still current.

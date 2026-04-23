@@ -13,6 +13,15 @@ CONF_RESPONSIVENESS = "responsiveness"
 CONF_DEFAULT_KINT = "default_kint"
 CONF_DEFAULT_KEXT = "default_kext"
 
+ACTUATOR_MODE_SWITCH = "switch"
+ACTUATOR_MODE_VALVE = "valve"
+CONF_THERMOSTAT_TYPE_KEY = "thermostat_type"
+CONF_AUTO_REGULATION_MODE_KEY = "auto_regulation_mode"
+THERMOSTAT_TYPE_VALVE = "thermostat_over_valve"
+THERMOSTAT_TYPE_CLIMATE = "thermostat_over_climate"
+# Mirror of versatile_thermostat.const.CONF_AUTO_REGULATION_VALVE.
+AUTO_REGULATION_VALVE = "auto_regulation_valve"
+
 DEFAULT_MINIMAL_ACTIVATION_DELAY = 0
 DEFAULT_MINIMAL_DEACTIVATION_DELAY = 0
 DEFAULT_ADAPTIVE_TPI_DEBUG = False
