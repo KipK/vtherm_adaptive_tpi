@@ -91,7 +91,6 @@ class DeadtimeTracker:
                 mode_sign != self._step.mode_sign
                 or target_temp is None
                 or abs(float(target_temp) - self._step.target_temp) > MAX_SETPOINT_JUMP
-                or current_on_percent < STEP_ABORT_POWER_NEW
             ):
                 self.reset()
             else:
