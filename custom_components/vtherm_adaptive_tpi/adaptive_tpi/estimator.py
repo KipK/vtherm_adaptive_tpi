@@ -18,6 +18,12 @@ MIN_DELTA_OUT = 1.0
 MIN_SETPOINT_ERROR = 0.2
 MAX_OFF_U_EFF = 0.15
 MIN_ON_U_EFF = 0.25
+MAD_OUTLIER_MIN_SAMPLES = 5
+MAD_OUTLIER_ROBUST_Z_THRESHOLD = 4.5
+MAD_NORMALIZATION_FACTOR = 1.4826
+OUTLIER_REGIME_CONFIRMATION_COUNT = 3
+OUTLIER_REGIME_MAX_RELATIVE_DISPERSION = 0.20
+OUTLIER_EPSILON = 1e-9
 
 
 def _clamp(value: float, lower: float, upper: float) -> float:
@@ -75,15 +81,18 @@ class _RobustScalarEstimator:
         self._lower = lower
         self._upper = upper
         self._samples: deque[float] = deque(maxlen=WINDOW_HISTORY)
+        self._outlier_candidates: deque[float] = deque(maxlen=OUTLIER_REGIME_CONFIRMATION_COUNT)
         self.last_reason = "not_initialized"
 
     def reset(self) -> None:
         self._samples.clear()
+        self._outlier_candidates.clear()
         self.last_reason = "not_initialized"
 
     def restore(self, estimate: float, confidence: float) -> None:
         del confidence
         self._samples.clear()
+        self._outlier_candidates.clear()
         self.last_reason = "restored"
         bounded = _clamp(estimate, self._lower, self._upper)
         if bounded > self._lower:
@@ -116,6 +125,7 @@ class _RobustScalarEstimator:
 
         self._samples.clear()
         self._samples.extend(cleaned_samples)
+        self._outlier_candidates.clear()
 
         last_reason = data.get("last_reason")
         self.last_reason = last_reason if isinstance(last_reason, str) and last_reason else "restored"
@@ -152,6 +162,35 @@ class _RobustScalarEstimator:
     def push(self, measurement: float) -> None:
         self._samples.append(_clamp(measurement, self._lower, self._upper))
         self.last_reason = "sample_accepted"
+
+    def is_outlier(self, measurement: float) -> bool:
+        if len(self._samples) < MAD_OUTLIER_MIN_SAMPLES:
+            return False
+        center = median(self._samples)
+        mad = median([abs(s - center) for s in self._samples])
+        if mad <= OUTLIER_EPSILON:
+            return False
+        robust_z = abs(measurement - center) / (MAD_NORMALIZATION_FACTOR * mad)
+        return robust_z > MAD_OUTLIER_ROBUST_Z_THRESHOLD
+
+    def record_outlier_candidate(self, measurement: float) -> bool:
+        self._outlier_candidates.append(_clamp(measurement, self._lower, self._upper))
+        if len(self._outlier_candidates) < OUTLIER_REGIME_CONFIRMATION_COUNT:
+            return False
+        candidates = list(self._outlier_candidates)
+        center = median(candidates)
+        if abs(center) <= OUTLIER_EPSILON:
+            return max(abs(c - center) for c in candidates) <= OUTLIER_EPSILON
+        max_deviation = max(abs(c - center) for c in candidates)
+        return max_deviation / abs(center) <= OUTLIER_REGIME_MAX_RELATIVE_DISPERSION
+
+    def confirm_outlier_regime(self) -> None:
+        self._samples.clear()
+        self._samples.extend(self._outlier_candidates)
+        self._outlier_candidates.clear()
+
+    def clear_outlier_candidates(self) -> None:
+        self._outlier_candidates.clear()
 
 
 class ParameterEstimator:
@@ -243,6 +282,19 @@ class ParameterEstimator:
             self._b_estimator.last_reason = "b_measurement_unphysical"
             return self._snapshot(i_a=0.0, i_b=1.0, a_updated=False, b_updated=False)
 
+        if self._b_estimator.is_outlier(measurement):
+            confirmed = self._b_estimator.record_outlier_candidate(measurement)
+            if not confirmed:
+                self._b_estimator.last_reason = "b_measurement_outlier_mad"
+                return self._snapshot(i_a=0.0, i_b=1.0, a_updated=False, b_updated=False)
+            self._b_estimator.confirm_outlier_regime()
+            self._b_estimator.last_reason = "b_outlier_regime_confirmed"
+            self.b_hat = self._b_estimator.estimate
+            self.c_b = self._b_estimator.confidence
+            self.b_converged = self._compute_b_converged()
+            return self._snapshot(i_a=0.0, i_b=1.0, a_updated=False, b_updated=True)
+        self._b_estimator.clear_outlier_candidates()
+
         self._b_estimator.push(measurement)
         self.b_hat = self._b_estimator.estimate
         self.c_b = self._b_estimator.confidence
@@ -301,6 +353,18 @@ class ParameterEstimator:
         if measurement < A_MIN:
             self._a_estimator.last_reason = "a_measurement_unphysical"
             return self._snapshot(i_a=1.0, i_b=0.0, a_updated=False, b_updated=False)
+
+        if self._a_estimator.is_outlier(measurement):
+            confirmed = self._a_estimator.record_outlier_candidate(measurement)
+            if not confirmed:
+                self._a_estimator.last_reason = "a_measurement_outlier_mad"
+                return self._snapshot(i_a=1.0, i_b=0.0, a_updated=False, b_updated=False)
+            self._a_estimator.confirm_outlier_regime()
+            self._a_estimator.last_reason = "a_outlier_regime_confirmed"
+            self.a_hat = self._a_estimator.estimate
+            self.c_a = self._a_estimator.confidence
+            return self._snapshot(i_a=1.0, i_b=0.0, a_updated=True, b_updated=False)
+        self._a_estimator.clear_outlier_candidates()
 
         self._a_estimator.push(measurement)
         self.a_hat = self._a_estimator.estimate

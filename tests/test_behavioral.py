@@ -34,6 +34,8 @@ from custom_components.vtherm_adaptive_tpi.adaptive_tpi.estimator import (
     BSample,
     B_MAX,
     B_MIN,
+    MAD_OUTLIER_MIN_SAMPLES,
+    OUTLIER_REGIME_CONFIRMATION_COUNT,
     ParameterEstimator,
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.learning_window import (
@@ -2543,3 +2545,188 @@ def test_bootstrap_stuck_exposes_explicit_freeze_reason() -> None:
     assert diagnostics["debug"]["accepted_cycles_count"] == 10
     assert diagnostics["debug"]["hours_without_excitation"] == pytest.approx(10 * 5.0 / 60.0)
     assert diagnostics["last_runtime_blocker"] == "insufficient_excitation_bootstrap"
+
+
+# ---------------------------------------------------------------------------
+# MAD outlier guard tests
+# ---------------------------------------------------------------------------
+
+# Helper: build 5 stable b samples around 0.10 with non-zero MAD.
+# measurement = -(dTdt / delta_out); using delta_out=8.0 gives measurements
+# [0.08, 0.09, 0.10, 0.11, 0.12], center=0.10, MAD=0.01.
+_STABLE_B_DTDTS = [-0.64, -0.72, -0.80, -0.88, -0.96]
+
+# Helper: build stable a samples around 0.50 given b_hat≈0.10, delta_out=8, u_eff=0.8.
+# measurement = (dTdt + 0.80) / 0.8; the five dTdts below yield [0.48..0.52].
+_STABLE_A_DTDTS = [-0.416, -0.408, -0.400, -0.392, -0.384]
+
+
+def _build_stable_b(estimator: ParameterEstimator) -> None:
+    for dTdt in _STABLE_B_DTDTS:
+        estimator.update_b(BSample(dTdt=dTdt, delta_out=8.0, setpoint_error=1.5, u_eff=0.0))
+
+
+def _build_stable_a(estimator: ParameterEstimator) -> None:
+    for dTdt in _STABLE_A_DTDTS:
+        estimator.update_a(ASample(dTdt=dTdt, delta_out=8.0, setpoint_error=1.5, u_eff=0.8))
+
+
+def test_b_mad_outlier_is_rejected() -> None:
+    """A single aberrant b measurement is rejected when the estimator has a stable baseline."""
+    estimator = ParameterEstimator()
+    _build_stable_b(estimator)
+
+    before = estimator.update_b(BSample(dTdt=-0.80, delta_out=8.0, setpoint_error=1.5, u_eff=0.0))
+    b_hat_before = before.b_hat
+    c_b_before = before.c_b
+    count_before = before.b_samples_count
+
+    # measurement = 3.2 / 8.0 = 0.40 — robust_z ≈ 20 >> 4.5
+    outlier = estimator.update_b(BSample(dTdt=-3.2, delta_out=8.0, setpoint_error=1.5, u_eff=0.0))
+
+    assert outlier.b_updated is False
+    assert outlier.updated is False
+    assert outlier.b_last_reason == "b_measurement_outlier_mad"
+    assert outlier.b_hat == pytest.approx(b_hat_before)
+    assert outlier.c_b == pytest.approx(c_b_before)
+    assert outlier.b_samples_count == count_before
+
+
+def test_a_mad_outlier_is_rejected() -> None:
+    """A single aberrant a measurement is rejected when the estimator has a stable baseline."""
+    estimator = ParameterEstimator()
+    _build_stable_b(estimator)
+    _build_stable_a(estimator)
+
+    before = estimator.update_a(ASample(dTdt=-0.400, delta_out=8.0, setpoint_error=1.5, u_eff=0.8))
+    a_hat_before = before.a_hat
+    c_a_before = before.c_a
+    count_before = before.a_samples_count
+
+    # measurement = (0.8 + 0.8) / 0.8 = 2.0 — robust_z ≈ 101 >> 4.5
+    outlier = estimator.update_a(ASample(dTdt=0.8, delta_out=8.0, setpoint_error=1.5, u_eff=0.8))
+
+    assert outlier.a_updated is False
+    assert outlier.updated is False
+    assert outlier.a_last_reason == "a_measurement_outlier_mad"
+    assert outlier.a_hat == pytest.approx(a_hat_before)
+    assert outlier.c_a == pytest.approx(c_a_before)
+    assert outlier.a_samples_count == count_before
+
+
+def test_mad_filter_disabled_with_small_history() -> None:
+    """With fewer than MAD_OUTLIER_MIN_SAMPLES, any physically valid b sample is accepted."""
+    estimator = ParameterEstimator()
+
+    # Feed MAD_OUTLIER_MIN_SAMPLES - 1 stable samples
+    for dTdt in _STABLE_B_DTDTS[: MAD_OUTLIER_MIN_SAMPLES - 1]:
+        estimator.update_b(BSample(dTdt=dTdt, delta_out=8.0, setpoint_error=1.5, u_eff=0.0))
+
+    assert estimator._b_estimator.samples_count == MAD_OUTLIER_MIN_SAMPLES - 1
+
+    # A far but physically valid measurement must not be rejected
+    update = estimator.update_b(BSample(dTdt=-3.2, delta_out=8.0, setpoint_error=1.5, u_eff=0.0))
+
+    assert update.b_updated is True
+    assert update.b_last_reason == "sample_accepted"
+    assert update.b_samples_count == MAD_OUTLIER_MIN_SAMPLES
+
+
+def test_persistent_b_outlier_regime_is_confirmed() -> None:
+    """Three coherent b outliers replace the estimator baseline on the third candidate."""
+    estimator = ParameterEstimator()
+    _build_stable_b(estimator)
+    b_hat_before = estimator.b_hat
+
+    # Coherent outlier measurements: 0.39, 0.40, 0.41 — all >> baseline 0.10
+    first = estimator.update_b(BSample(dTdt=-3.12, delta_out=8.0, setpoint_error=1.5, u_eff=0.0))
+    assert first.b_updated is False
+    assert first.b_last_reason == "b_measurement_outlier_mad"
+
+    second = estimator.update_b(BSample(dTdt=-3.20, delta_out=8.0, setpoint_error=1.5, u_eff=0.0))
+    assert second.b_updated is False
+    assert second.b_last_reason == "b_measurement_outlier_mad"
+
+    third = estimator.update_b(BSample(dTdt=-3.28, delta_out=8.0, setpoint_error=1.5, u_eff=0.0))
+    assert third.b_updated is True
+    assert third.b_last_reason == "b_outlier_regime_confirmed"
+    assert third.b_samples_count == OUTLIER_REGIME_CONFIRMATION_COUNT
+    assert third.b_hat == pytest.approx(0.40, abs=0.02)
+    assert abs(third.b_hat - b_hat_before) > 0.20
+
+
+def test_persistent_a_outlier_regime_is_confirmed() -> None:
+    """Three coherent a outliers replace the estimator baseline on the third candidate."""
+    estimator = ParameterEstimator()
+    _build_stable_b(estimator)
+    _build_stable_a(estimator)
+    a_hat_before = estimator.a_hat
+
+    # Coherent a outlier measurements: 1.8, 1.9, 2.0 — all >> baseline 0.50
+    # measurement = (dTdt + 0.80) / 0.8; for 1.8: dTdt=0.64, 1.9: 0.72, 2.0: 0.80
+    first = estimator.update_a(ASample(dTdt=0.64, delta_out=8.0, setpoint_error=1.5, u_eff=0.8))
+    assert first.a_updated is False
+    assert first.a_last_reason == "a_measurement_outlier_mad"
+
+    second = estimator.update_a(ASample(dTdt=0.72, delta_out=8.0, setpoint_error=1.5, u_eff=0.8))
+    assert second.a_updated is False
+    assert second.a_last_reason == "a_measurement_outlier_mad"
+
+    third = estimator.update_a(ASample(dTdt=0.80, delta_out=8.0, setpoint_error=1.5, u_eff=0.8))
+    assert third.a_updated is True
+    assert third.a_last_reason == "a_outlier_regime_confirmed"
+    assert third.a_samples_count == OUTLIER_REGIME_CONFIRMATION_COUNT
+    assert third.a_hat == pytest.approx(1.9, abs=0.1)
+    assert abs(third.a_hat - a_hat_before) > 1.0
+
+
+def test_normal_b_sample_clears_outlier_candidate_evidence() -> None:
+    """A normal sample after an outlier candidate resets the candidate buffer."""
+    estimator = ParameterEstimator()
+    _build_stable_b(estimator)
+
+    # First outlier — 1 candidate, rejected
+    first = estimator.update_b(BSample(dTdt=-3.2, delta_out=8.0, setpoint_error=1.5, u_eff=0.0))
+    assert first.b_updated is False
+    assert first.b_last_reason == "b_measurement_outlier_mad"
+
+    # Normal sample — accepted, candidates cleared
+    normal = estimator.update_b(BSample(dTdt=-0.80, delta_out=8.0, setpoint_error=1.5, u_eff=0.0))
+    assert normal.b_updated is True
+    assert normal.b_last_reason == "sample_accepted"
+
+    # Two more outliers — candidate count restarts from zero, so still only 2 candidates
+    second = estimator.update_b(BSample(dTdt=-3.12, delta_out=8.0, setpoint_error=1.5, u_eff=0.0))
+    assert second.b_updated is False
+    assert second.b_last_reason == "b_measurement_outlier_mad"
+
+    third = estimator.update_b(BSample(dTdt=-3.20, delta_out=8.0, setpoint_error=1.5, u_eff=0.0))
+    assert third.b_updated is False
+    assert third.b_last_reason == "b_measurement_outlier_mad"
+
+
+def test_incoherent_b_outlier_candidate_blocks_regime_confirmation() -> None:
+    """A contradictory candidate among the last N prevents regime confirmation.
+
+    Scenario: two high outliers (~0.40) then one low outlier (~0.01).
+    The candidate deque becomes [0.40, 0.40, 0.01].  median(abs deviations)
+    would be 0.0 (a bug), but max(abs deviations)/center = 0.975 >> 0.20,
+    so the regime must NOT be confirmed.
+    """
+    estimator = ParameterEstimator()
+    _build_stable_b(estimator)  # 5 samples around 0.10, MAD=0.01
+
+    # Two high outliers: measurement 0.40 — both classified as outliers, both rejected
+    first = estimator.update_b(BSample(dTdt=-3.20, delta_out=8.0, setpoint_error=1.5, u_eff=0.0))
+    assert first.b_updated is False
+    assert first.b_last_reason == "b_measurement_outlier_mad"
+
+    second = estimator.update_b(BSample(dTdt=-3.20, delta_out=8.0, setpoint_error=1.5, u_eff=0.0))
+    assert second.b_updated is False
+    assert second.b_last_reason == "b_measurement_outlier_mad"
+
+    # Contradictory low outlier: measurement 0.01 — also an outlier (robust_z ≈ 6 > 4.5),
+    # but incoherent with the previous two; candidates = [0.40, 0.40, 0.01].
+    third = estimator.update_b(BSample(dTdt=-0.08, delta_out=8.0, setpoint_error=1.5, u_eff=0.0))
+    assert third.b_updated is False
+    assert third.b_last_reason == "b_measurement_outlier_mad"
