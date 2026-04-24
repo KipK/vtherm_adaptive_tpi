@@ -845,14 +845,19 @@ class AdaptiveTPIAlgorithm:
 
     @staticmethod
     def _is_estimator_informative_cycle(sample: CycleSample) -> bool:
-        """Return True when one cycle is informative for `b`, even with 0% heating."""
-        setpoint_error = abs(sample.target_temp - sample.current_temp)
+        """Return True when one cycle is informative for `b` or `a` estimation.
+
+        OFF cycles skip the setpoint-error gate because b = -dTdt/delta_out does
+        not require a gap from setpoint to be physically meaningful.
+        """
         outdoor_delta = abs(sample.current_temp - sample.outdoor_temp)
-        if setpoint_error < _MIN_ESTIMATOR_SETPOINT_ERROR:
-            return False
         if outdoor_delta < _MIN_ESTIMATOR_OUTDOOR_DELTA:
             return False
-        return True
+        regime = classify_cycle_regime(sample.applied_demand)
+        if regime == WINDOW_REGIME_OFF:
+            return True
+        setpoint_error = abs(sample.target_temp - sample.current_temp)
+        return setpoint_error >= _MIN_ESTIMATOR_SETPOINT_ERROR
 
     def _increment_hours_without_excitation(self, cycle_duration_min: float | None) -> None:
         """Track how long learning has been starved of informative cycles."""

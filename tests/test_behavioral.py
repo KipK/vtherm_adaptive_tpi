@@ -3307,3 +3307,239 @@ def test_incoherent_b_outlier_candidate_blocks_regime_confirmation() -> None:
     third = estimator.update_b(BSample(dTdt=-0.08, delta_out=8.0, setpoint_error=1.5, u_eff=0.0))
     assert third.b_updated is False
     assert third.b_last_reason == "b_measurement_outlier_mad"
+
+
+# ---------------------------------------------------------------------------
+# Adaptive window policy — flexible A/B learning tests
+# ---------------------------------------------------------------------------
+
+
+def _make_off_entries(
+    tins: list[float],
+    *,
+    tout: float = 5.0,
+    target: float = 20.0,
+    cycle_duration_min: float = 5.0,
+    is_estimator_informative: bool = True,
+) -> tuple[CycleHistoryEntry, ...]:
+    """Build a sequence of OFF entries followed by a valid terminal entry."""
+    entries = []
+    for tin in tins[:-1]:
+        entries.append(
+            CycleHistoryEntry(
+                tin=tin,
+                tout=tout,
+                target_temp=target,
+                applied_power=0.0,
+                is_valid=True,
+                is_informative=True,
+                is_estimator_informative=is_estimator_informative,
+                cycle_duration_min=cycle_duration_min,
+            )
+        )
+    entries.append(
+        CycleHistoryEntry(
+            tin=tins[-1],
+            tout=tout,
+            target_temp=target,
+            applied_power=0.0,
+            is_valid=True,
+            is_informative=False,
+            is_estimator_informative=False,
+            cycle_duration_min=cycle_duration_min,
+        )
+    )
+    return tuple(entries)
+
+
+def test_learning_window_extends_beyond_three_cycles_for_short_cycles() -> None:
+    """Short 5-min cycles must be allowed to accumulate beyond the old 3-cycle cap."""
+    # 6 OFF cycles of 5 min; cooling is too slow to exceed 0.08 in 3 cycles
+    # but accumulates enough amplitude over 5 cycles (total 25 min).
+    tins = [20.0, 19.98, 19.96, 19.94, 19.92, 19.88, 19.80]
+    observations = _make_off_entries(tins, cycle_duration_min=5.0)
+
+    result = build_learning_window(
+        observations,
+        nd_hat=0.0,
+        regime=WINDOW_REGIME_OFF,
+    )
+
+    assert result.sample is not None, result.reason
+    assert result.sample.cycle_count > 3
+    assert result.sample.dTdt < 0
+    assert result.sample.total_duration_min > 15.0
+    # dTdt must remain per-cycle, not per-minute
+    assert abs(result.sample.dTdt) < 0.5
+
+
+def test_learning_window_relaxed_amplitude_accepted_with_directional_steps() -> None:
+    """An OFF window with amplitude between 0.05 and 0.08 and consistent steps is accepted."""
+    # 3 OFF cycles, each dropping ~0.02 °C → amplitude = 0.06, 3 directional steps
+    tins = [20.00, 19.98, 19.96, 19.94]
+    observations = _make_off_entries(tins, cycle_duration_min=4.0)
+
+    result = build_learning_window(
+        observations,
+        nd_hat=0.0,
+        regime=WINDOW_REGIME_OFF,
+    )
+
+    assert result.sample is not None, result.reason
+    assert result.sample.amplitude == pytest.approx(-0.06)
+    assert result.sample.dTdt < 0
+
+
+def test_learning_window_relaxed_amplitude_rejected_when_alternating() -> None:
+    """A window with amplitude in the relaxed band must not be accepted if steps alternate."""
+    # Amplitude end-to-end = -0.06, but the intermediate step goes the wrong way.
+    tins = [20.00, 19.96, 19.99, 19.94]
+    observations = _make_off_entries(tins, cycle_duration_min=4.0)
+
+    result = build_learning_window(
+        observations,
+        nd_hat=0.0,
+        regime=WINDOW_REGIME_OFF,
+    )
+
+    # Net amplitude ≈ -0.06 (relaxed band), but not enough directional steps
+    assert result.sample is None
+    assert "waiting" in result.reason
+
+
+def test_learning_window_sliding_start_off_skips_inertial_warmup() -> None:
+    """OFF window must slide past an initial inertial warm-up and produce a b sample."""
+    # HEAT mode: first 2 points still rising (inertia), then 3 points cooling.
+    tins = [19.50, 19.55, 19.60, 19.45, 19.28, 19.10]
+    observations = _make_off_entries(tins, cycle_duration_min=5.0)
+
+    result = build_learning_window(
+        observations,
+        nd_hat=0.0,
+        regime=WINDOW_REGIME_OFF,
+        mode_sign=1,
+    )
+
+    assert result.sample is not None, result.reason
+    assert result.sample.dTdt < 0
+    assert result.sample.amplitude < 0
+
+
+def test_learning_window_sliding_start_off_rejects_when_no_cooling_segment() -> None:
+    """OFF window must not produce a sample when every segment keeps warming."""
+    tins = [19.0, 19.1, 19.2, 19.3, 19.4]
+    observations = _make_off_entries(tins, cycle_duration_min=5.0)
+
+    result = build_learning_window(
+        observations,
+        nd_hat=0.0,
+        regime=WINDOW_REGIME_OFF,
+        mode_sign=1,
+    )
+
+    assert result.sample is None
+    # Either no-thermal-loss (if at max cycles) or waiting-more-signal
+    assert result.reason in ("off_window_no_thermal_loss", "off_window_waiting_more_signal")
+
+
+def test_learning_window_off_near_setpoint_feeds_b() -> None:
+    """An OFF window near setpoint must still feed b when the thermal signal is good."""
+    # setpoint_error ≈ 0.05 (well below 0.2), but delta_out = 10.0 and signal is clear.
+    tins = [20.05, 19.90, 19.70]
+    observations = tuple(
+        CycleHistoryEntry(
+            tin=tin,
+            tout=10.0,
+            target_temp=20.0,
+            applied_power=0.0,
+            is_valid=True,
+            is_informative=True,
+            is_estimator_informative=True,
+            cycle_duration_min=5.0,
+        )
+        for tin in tins
+    )
+
+    result = build_anchored_learning_window(
+        observations,
+        nd_hat=0.0,
+        regime=WINDOW_REGIME_OFF,
+        end_index=1,
+        mode_sign=1,
+    )
+
+    assert result.sample is not None, result.reason
+    assert result.sample.allow_near_setpoint_b is True
+    assert result.sample.setpoint_error < 0.2
+
+
+def test_estimator_b_accepts_sample_with_low_delta_out() -> None:
+    """b must accept a sample with delta_out >= 0.5 (below the old 1.0 gate)."""
+    estimator = ParameterEstimator()
+
+    update = estimator.update_b(
+        BSample(
+            dTdt=-0.04,
+            delta_out=0.7,
+            setpoint_error=1.0,
+            u_eff=0.0,
+        )
+    )
+
+    assert update.b_updated is True
+    assert update.b_hat > 0.0
+    assert update.b_last_reason == "sample_accepted"
+
+
+def test_estimator_b_rejects_sample_with_very_low_delta_out() -> None:
+    """b must reject a sample with delta_out < 0.5."""
+    estimator = ParameterEstimator()
+
+    update = estimator.update_b(
+        BSample(
+            dTdt=-0.04,
+            delta_out=0.4,
+            setpoint_error=1.0,
+            u_eff=0.0,
+        )
+    )
+
+    assert update.b_updated is False
+    assert update.b_last_reason == "b_delta_out_too_small"
+
+
+def test_estimator_a_still_requires_full_delta_out() -> None:
+    """a must still reject samples with delta_out < 1.0 despite the b relaxation."""
+    estimator = ParameterEstimator()
+    for _ in range(4):
+        estimator.update_b(
+            BSample(dTdt=-0.08, delta_out=8.0, setpoint_error=1.0, u_eff=0.0)
+        )
+
+    update = estimator.update_a(
+        ASample(
+            dTdt=0.06,
+            delta_out=0.7,
+            setpoint_error=1.0,
+            u_eff=0.6,
+        )
+    )
+
+    assert update.a_updated is False
+    assert update.a_last_reason == "a_delta_out_too_small"
+
+
+def test_learning_window_flat_amplitude_below_relaxed_threshold_never_accepted() -> None:
+    """A very flat window must never produce a sample, regardless of window length."""
+    # Amplitude << 0.05 across many cycles — thermal signal is absent.
+    tins = [20.000, 19.998, 19.996, 19.994, 19.992, 19.990, 19.988]
+    observations = _make_off_entries(tins, cycle_duration_min=5.0)
+
+    result = build_learning_window(
+        observations,
+        nd_hat=0.0,
+        regime=WINDOW_REGIME_OFF,
+    )
+
+    assert result.sample is None
+    assert "waiting" in result.reason

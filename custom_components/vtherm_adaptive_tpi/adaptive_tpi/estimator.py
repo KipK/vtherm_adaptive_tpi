@@ -14,7 +14,8 @@ B_MAX = 0.5
 WINDOW_HISTORY = 12
 B_CONVERGENCE_MIN_SAMPLES = 3
 B_CONVERGENCE_MIN_CONFIDENCE = 0.55
-MIN_DELTA_OUT = 1.0
+MIN_B_DELTA_OUT = 0.5
+MIN_A_DELTA_OUT = 1.0
 MIN_SETPOINT_ERROR = 0.2
 MAX_OFF_U_EFF = 0.15
 MIN_ON_U_EFF = 0.25
@@ -264,7 +265,7 @@ class ParameterEstimator:
             self._b_estimator.last_reason = reason
             return self._snapshot(i_a=0.0, i_b=0.0, a_updated=False, b_updated=False)
 
-        if abs(sample.delta_out) < MIN_DELTA_OUT:
+        if abs(sample.delta_out) < MIN_B_DELTA_OUT:
             self._b_estimator.last_reason = "b_delta_out_too_small"
             return self._snapshot(i_a=0.0, i_b=0.0, a_updated=False, b_updated=False)
         if (
@@ -337,7 +338,7 @@ class ParameterEstimator:
         if not self.b_converged:
             self._a_estimator.last_reason = "a_waiting_b_converged"
             return self._snapshot(i_a=0.0, i_b=0.0, a_updated=False, b_updated=False)
-        if abs(sample.delta_out) < MIN_DELTA_OUT:
+        if abs(sample.delta_out) < MIN_A_DELTA_OUT:
             self._a_estimator.last_reason = "a_delta_out_too_small"
             return self._snapshot(i_a=1.0, i_b=0.0, a_updated=False, b_updated=False)
         if sample.setpoint_error < MIN_SETPOINT_ERROR:

@@ -80,14 +80,14 @@ Responsabilités :
 - reconstruire les fenêtres OFF récentes pour `b`
 - reconstruire les fenêtres ON récentes pour `a`
 - ancrer les fenêtres sur le cycle actuellement complété
-- appliquer des fenêtres courtes bornées
+- appliquer des fenêtres bornées par une politique adaptative
 - rejeter les fenêtres quand :
   - le signal est trop faible
   - le signe du régime est incohérent
   - un changement de point de consigne récent contredit le régime
   - la fenêtre intersecte toujours l'extinction de temps mort post-transition
 
-Le silence d'apprentissage dépend actuellement du temps mort :
+Le silence d'apprentissage dépend du temps mort :
 
 - silence de `ceil(nd_hat)` cycles après une transition de régime
 - avec un silence de sécurité minimum de `1` cycle quand le temps mort n'est pas encore connu
@@ -97,6 +97,33 @@ La garde de saut de point de consigne est orientée par régime :
 - les fenêtres ON tolèrent les sauts de point de consigne vers le haut qui renforcent le chauffage
 - les fenêtres OFF tolèrent les sauts de point de consigne vers le bas qui renforcent le régime sans chauffage actuel
 - les sauts contradictoires invalident toujours la fenêtre
+
+Les limites de taille de fenêtre sont adaptatives (voir `adaptive_tpi/learning_policy.py`) :
+
+- `max_cycles` s'adapte à la durée de cycle pour ne pas bloquer les cycles courts
+- la durée maximale est de 120 min (plus conservateur que les 240 min de SmartPI)
+
+La validation du signal thermique utilise deux niveaux :
+
+- **standard** : `|amplitude| ≥ 0,08 °C` et `durée ≥ 8 min`
+- **relaxé** : `|amplitude| ≥ 0,05 °C` et `durée ≥ 8 min` et au moins 2 variations dans le bon sens
+
+Un **démarrage glissant** est tenté quand la fenêtre complète a le mauvais signe thermique
+à cause d'une inertie post-transition ; la fenêtre est ancrée sur le premier point où le signe se corrige.
+
+Les fenêtres OFF transportent toujours `allow_near_setpoint_b = True` pour que l'estimateur
+ne les rejette pas en raison d'un faible écart au point de consigne —
+`b = -dTdt / delta_out` n'en a pas besoin.
+
+### `adaptive_tpi/learning_policy.py`
+
+Calcule la politique de fenêtre adaptative utilisée par `learning_window.py`.
+
+Responsabilités :
+
+- dériver `max_cycles` et `max_duration_min` à partir de la durée de cycle courante
+- exposer les seuils d'amplitude standard et relaxé
+- garder la construction de politique isolée de la logique de fenêtre
 
 ### `adaptive_tpi/estimator.py`
 
@@ -109,10 +136,14 @@ Responsabilités :
 - garder les estimations bornées et les valeurs de confiance
 - exposer les comptages d'échantillons et les dernières raisons de rejet
 
-Choix de conception actuel :
+Choix de conception :
 
 - l'estimateur utilise un estimateur robuste roulant borné
 - c'est intentionnellement plus simple qu'une approche LMS/RLS en ligne plus agressive
+- `b` utilise `MIN_B_DELTA_OUT = 0,5` — exploitable avec un contraste extérieur modéré
+- `a` garde `MIN_A_DELTA_OUT = 1,0` — plus conservateur
+- la gate d'écart au point de consigne (`MIN_SETPOINT_ERROR`) s'applique à `a` uniquement ;
+  `b` la contourne quand `allow_near_setpoint_b` est positionné par la fenêtre d'apprentissage
 
 ### `adaptive_tpi/controller.py`
 

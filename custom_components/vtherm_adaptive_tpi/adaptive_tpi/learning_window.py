@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from math import ceil, floor
 
 from .deadtime import CycleHistoryEntry
+from .learning_policy import LearningWindowPolicy, build_learning_window_policy
 
 WINDOW_REGIME_OFF = "off"
 WINDOW_REGIME_ON = "on"
@@ -13,10 +14,6 @@ WINDOW_REGIME_MIXED = "mixed"
 
 OFF_POWER_MAX = 0.10
 ON_POWER_MIN = 0.25
-MIN_WINDOW_AMPLITUDE = 0.08
-MIN_WINDOW_DURATION_MIN = 8.0
-MAX_WINDOW_CYCLES = 3
-MAX_WINDOW_DURATION_MIN = 45.0
 MAX_SETPOINT_JUMP = 0.3
 
 
@@ -134,10 +131,13 @@ def build_anchored_learning_window(
             waiting_next_cycle=False,
         )
 
+    cycle_duration_min = _duration_minutes(observations[end_index])
+    policy = build_learning_window_policy(nd_hat=nd_hat, cycle_duration_min=cycle_duration_min)
+
     start_index = end_index
     total_duration_min = _duration_minutes(observations[end_index])
     cycle_count = 1
-    while start_index > 0 and cycle_count < MAX_WINDOW_CYCLES:
+    while start_index > 0 and cycle_count < policy.max_cycles:
         previous = observations[start_index - 1]
         if not _can_feed_estimator(previous, regime):
             break
@@ -145,7 +145,7 @@ def build_anchored_learning_window(
         if previous_regime != regime and previous_regime != WINDOW_REGIME_MIXED:
             break
         next_duration = total_duration_min + _duration_minutes(previous)
-        if next_duration > MAX_WINDOW_DURATION_MIN:
+        if next_duration > policy.max_duration_min:
             break
         start_index -= 1
         total_duration_min = next_duration
@@ -194,31 +194,95 @@ def build_anchored_learning_window(
         total_duration_min = sum(_duration_minutes(entry) for entry in cycle_slice)
 
     end_observation = observations[end_index + 1]
+    amplitude = end_observation.tin - observations[start_index].tin
 
-    start_observation = observations[start_index]
-    amplitude = end_observation.tin - start_observation.tin
-    # In HEAT (+1): OFF window must cool (amplitude < 0), ON window must warm (amplitude > 0).
-    # In COOL (-1): signs are reversed — OFF warms, ON cools.
+    # Check thermal direction; try sliding start when the full window has the wrong sign.
     if regime == WINDOW_REGIME_OFF and mode_sign * amplitude >= 0.0:
-        return LearningWindowResult(
-            sample=None,
-            reason="off_window_no_thermal_loss",
-            waiting_next_cycle=False,
+        slid = _find_sliding_start(
+            observations,
+            start_index=start_index,
+            end_index=end_index,
+            regime=regime,
+            mode_sign=mode_sign,
         )
-    if regime == WINDOW_REGIME_ON and mode_sign * amplitude <= 0.0:
-        return LearningWindowResult(
-            sample=None,
-            reason="on_window_no_actuator_effect",
-            waiting_next_cycle=False,
+        if slid is None:
+            can_grow = (
+                cycle_count < policy.max_cycles
+                and total_duration_min < policy.max_duration_min
+            )
+            if can_grow:
+                return LearningWindowResult(
+                    sample=None,
+                    reason="off_window_waiting_more_signal",
+                    waiting_next_cycle=True,
+                    deadtime_blackout_active=blackout_active,
+                )
+            return LearningWindowResult(
+                sample=None,
+                reason="off_window_no_thermal_loss",
+                waiting_next_cycle=False,
+                deadtime_blackout_active=blackout_active,
+            )
+        start_index = slid
+        cycle_count = end_index - start_index + 1
+        total_duration_min = sum(
+            _duration_minutes(observations[i]) for i in range(start_index, end_index + 1)
         )
-    if (
-        abs(amplitude) < MIN_WINDOW_AMPLITUDE
-        or total_duration_min < MIN_WINDOW_DURATION_MIN
-    ):
+        amplitude = end_observation.tin - observations[start_index].tin
+
+    elif regime == WINDOW_REGIME_ON and mode_sign * amplitude <= 0.0:
+        slid = _find_sliding_start(
+            observations,
+            start_index=start_index,
+            end_index=end_index,
+            regime=regime,
+            mode_sign=mode_sign,
+        )
+        if slid is None:
+            can_grow = (
+                cycle_count < policy.max_cycles
+                and total_duration_min < policy.max_duration_min
+            )
+            if can_grow:
+                return LearningWindowResult(
+                    sample=None,
+                    reason="on_window_waiting_more_signal",
+                    waiting_next_cycle=True,
+                    deadtime_blackout_active=blackout_active,
+                )
+            return LearningWindowResult(
+                sample=None,
+                reason="on_window_no_actuator_effect",
+                waiting_next_cycle=False,
+                deadtime_blackout_active=blackout_active,
+            )
+        start_index = slid
+        cycle_count = end_index - start_index + 1
+        total_duration_min = sum(
+            _duration_minutes(observations[i]) for i in range(start_index, end_index + 1)
+        )
+        amplitude = end_observation.tin - observations[start_index].tin
+
+    ready, reason, waiting = _thermal_signal_ready(
+        observations=observations,
+        start_index=start_index,
+        end_index=end_index,
+        regime=regime,
+        mode_sign=mode_sign,
+        amplitude=amplitude,
+        total_duration_min=total_duration_min,
+        policy=policy,
+    )
+    if not ready:
+        can_grow = (
+            cycle_count < policy.max_cycles
+            and total_duration_min < policy.max_duration_min
+        )
         return LearningWindowResult(
             sample=None,
-            reason=f"{regime}_window_waiting_more_signal",
-            waiting_next_cycle=(cycle_count < MAX_WINDOW_CYCLES),
+            reason=reason,
+            waiting_next_cycle=waiting and can_grow,
+            deadtime_blackout_active=blackout_active,
         )
 
     delayed_powers: list[float] = []
@@ -257,7 +321,9 @@ def build_anchored_learning_window(
             points_count=cycle_count + 1,
             total_duration_min=total_duration_min,
             amplitude=amplitude,
-            allow_near_setpoint_b=any(
+            # All ready OFF windows allow b to learn near setpoint because
+            # b = -dTdt/delta_out does not require a setpoint gap to be valid.
+            allow_near_setpoint_b=(regime == WINDOW_REGIME_OFF) or any(
                 entry.bootstrap_b_learning_allowed for entry in cycle_slice
             ),
         ),
@@ -265,6 +331,82 @@ def build_anchored_learning_window(
         waiting_next_cycle=False,
         deadtime_blackout_active=blackout_active,
     )
+
+
+def _thermal_signal_ready(
+    *,
+    observations: tuple[CycleHistoryEntry, ...],
+    start_index: int,
+    end_index: int,
+    regime: str,
+    mode_sign: int,
+    amplitude: float,
+    total_duration_min: float,
+    policy: LearningWindowPolicy,
+) -> tuple[bool, str, bool]:
+    """Decide whether the thermal signal is ready, relaxed-ready, or still waiting."""
+    abs_amp = abs(amplitude)
+
+    if abs_amp >= policy.min_amplitude and total_duration_min >= policy.min_duration_min:
+        return True, f"{regime}_window_ready", False
+
+    if abs_amp >= policy.relaxed_min_amplitude and total_duration_min >= policy.min_duration_min:
+        steps = _count_directional_steps(
+            observations,
+            start_index=start_index,
+            end_index=end_index,
+            mode_sign=mode_sign,
+            regime=regime,
+        )
+        if steps >= policy.min_directional_steps:
+            return True, f"{regime}_window_ready", False
+
+    return False, f"{regime}_window_waiting_more_signal", True
+
+
+def _count_directional_steps(
+    observations: tuple[CycleHistoryEntry, ...],
+    *,
+    start_index: int,
+    end_index: int,
+    mode_sign: int,
+    regime: str,
+) -> int:
+    """Count temperature steps in the thermodynamically correct direction."""
+    # OFF in HEAT: expect tin to decrease → effective_sign = -1 * 1 = -1
+    # ON  in HEAT: expect tin to increase → effective_sign = +1 * 1 = +1
+    # OFF in COOL: expect tin to increase → effective_sign = -1 * -1 = +1
+    # ON  in COOL: expect tin to decrease → effective_sign = +1 * -1 = -1
+    regime_sign = -1 if regime == WINDOW_REGIME_OFF else 1
+    effective_sign = regime_sign * mode_sign
+    count = 0
+    for i in range(start_index, end_index + 1):
+        delta = observations[i + 1].tin - observations[i].tin
+        if effective_sign * delta > 0:
+            count += 1
+    return count
+
+
+def _find_sliding_start(
+    observations: tuple[CycleHistoryEntry, ...],
+    *,
+    start_index: int,
+    end_index: int,
+    regime: str,
+    mode_sign: int,
+) -> int | None:
+    """Find the earliest start index where the window has the correct thermal sign.
+
+    Slides forward from start_index + 1 only — never before the guard-imposed boundary.
+    """
+    end_tin = observations[end_index + 1].tin
+    for candidate in range(start_index + 1, end_index + 1):
+        candidate_amplitude = end_tin - observations[candidate].tin
+        if regime == WINDOW_REGIME_OFF and mode_sign * candidate_amplitude < 0:
+            return candidate
+        if regime == WINDOW_REGIME_ON and mode_sign * candidate_amplitude > 0:
+            return candidate
+    return None
 
 
 def _find_latest_candidate_end(

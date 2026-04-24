@@ -83,14 +83,14 @@ Responsibilities:
 - reconstruct recent OFF windows for `b`
 - reconstruct recent ON windows for `a`
 - anchor windows on the current completed cycle
-- enforce short bounded windows
+- enforce windows bounded by an adaptive policy
 - reject windows when:
   - the signal is too weak
   - the regime sign is inconsistent
   - a recent setpoint change contradicts the regime
   - the window still intersects the post-transition deadtime blackout
 
-The learning blackout currently depends on deadtime:
+The learning blackout depends on deadtime:
 
 - blackout of `ceil(nd_hat)` cycles after a regime transition
 - with a minimum safety blackout of `1` cycle when deadtime is not yet known
@@ -100,6 +100,32 @@ The setpoint-jump guard is regime-oriented:
 - ON windows tolerate upward setpoint jumps that reinforce heating
 - OFF windows tolerate downward setpoint jumps that reinforce the current no-heat regime
 - contradictory jumps still invalidate the window
+
+Window size limits are adaptive (see `adaptive_tpi/learning_policy.py`):
+
+- `max_cycles` scales with cycle duration so short cycles are not artificially capped
+- maximum window duration is 120 min (more conservative than 240 min used by SmartPI)
+
+Signal validation uses two tiers:
+
+- **standard**: `|amplitude| ≥ 0.08 °C` and `duration ≥ 8 min`
+- **relaxed**: `|amplitude| ≥ 0.05 °C` and `duration ≥ 8 min` and at least 2 directional steps
+
+A **sliding start** is attempted when the full window has the wrong thermal sign due to
+post-transition inertia; the window is anchored on the first point where the sign corrects.
+
+OFF windows always carry `allow_near_setpoint_b = True` so the estimator does not reject
+them because of a small setpoint gap — `b = -dTdt / delta_out` does not need one.
+
+### `adaptive_tpi/learning_policy.py`
+
+Computes the adaptive window policy used by `learning_window.py`.
+
+Responsibilities:
+
+- derive `max_cycles` and `max_duration_min` from the current cycle duration
+- expose the standard and relaxed amplitude thresholds
+- keep the policy construction isolated from the window logic
 
 ### `adaptive_tpi/estimator.py`
 
@@ -112,10 +138,14 @@ Responsibilities:
 - keep bounded estimates and confidence values
 - expose sample counts and last rejection reasons
 
-Current design choice:
+Design choices:
 
 - the estimator uses a bounded rolling robust estimator
 - this is intentionally simpler than a more aggressive online LMS/RLS approach
+- `b` uses `MIN_B_DELTA_OUT = 0.5` — exploitable with moderate outdoor contrast
+- `a` keeps `MIN_A_DELTA_OUT = 1.0` — more conservative
+- the setpoint-error gate (`MIN_SETPOINT_ERROR`) applies to `a` only; `b` bypasses it
+  when `allow_near_setpoint_b` is set by the learning window
 
 ### `adaptive_tpi/controller.py`
 
