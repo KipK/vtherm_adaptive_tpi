@@ -20,7 +20,11 @@ from custom_components.vtherm_adaptive_tpi.adaptive_tpi.controller import (
 )
 from custom_components.vtherm_adaptive_tpi.handler import (
     AdaptiveTPIHandler,
+    _AdaptiveTPIStore,
     _resolve_actuator_mode,
+)
+from custom_components.vtherm_adaptive_tpi.adaptive_tpi.state import (
+    PERSISTENCE_SCHEMA_VERSION,
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.valve_curve import (
     IdentityValveCurve,
@@ -681,6 +685,83 @@ def test_startup_bootstrap_detects_mid_cycle_command_flip_after_thermostat_recal
         )
         is True
     )
+
+
+@pytest.mark.asyncio
+async def test_store_migration_keeps_v1_persisted_payload_readable() -> None:
+    """Store migration should not discard compatible learning payloads."""
+    store = object.__new__(_AdaptiveTPIStore)
+    payload = {
+        "schema_version": 1,
+        "state": {"k_int": 0.7, "k_ext": 0.03},
+    }
+
+    migrated = await store._async_migrate_func(1, 1, payload)
+
+    assert migrated is payload
+
+
+@pytest.mark.asyncio
+async def test_handler_loads_v1_persisted_payload_after_store_migration() -> None:
+    """Schema-1 learning payloads should remain usable after storage migration."""
+    payload = {
+        "schema_version": 1,
+        "state": {"k_int": 0.7, "k_ext": 0.03},
+        "cycle_min": 5.0,
+        "last_accepted_at": None,
+        "saved_at": None,
+    }
+
+    class StoreStub:
+        async def async_load(self):
+            return payload
+
+    thermostat = SimpleNamespace(
+        prop_algorithm=SimpleNamespace(load_state=MagicMock()),
+        cycle_min=5,
+    )
+    handler = object.__new__(AdaptiveTPIHandler)
+    handler._thermostat = thermostat
+    handler._store = StoreStub()
+    handler._refresh_published_diagnostics = MagicMock()
+
+    await handler._async_load_persisted_state()
+
+    thermostat.prop_algorithm.load_state.assert_called_once_with(
+        payload["state"],
+        current_cycle_min=5.0,
+        persisted_cycle_min=5.0,
+        last_accepted_at=None,
+        saved_at=None,
+    )
+    handler._refresh_published_diagnostics.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_handler_ignores_unsupported_persisted_payload_schema() -> None:
+    """Unsupported learning payload schemas should not be restored."""
+    payload = {
+        "schema_version": PERSISTENCE_SCHEMA_VERSION + 1,
+        "state": {"k_int": 0.7, "k_ext": 0.03},
+    }
+
+    class StoreStub:
+        async def async_load(self):
+            return payload
+
+    thermostat = SimpleNamespace(
+        prop_algorithm=SimpleNamespace(load_state=MagicMock()),
+        cycle_min=5,
+    )
+    handler = object.__new__(AdaptiveTPIHandler)
+    handler._thermostat = thermostat
+    handler._store = StoreStub()
+    handler._refresh_published_diagnostics = MagicMock()
+
+    await handler._async_load_persisted_state()
+
+    thermostat.prop_algorithm.load_state.assert_not_called()
+    handler._refresh_published_diagnostics.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -40,6 +40,23 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 _STORAGE_KEY_PREFIX = f"{DOMAIN}.state"
+_SUPPORTED_PERSISTENCE_SCHEMA_VERSIONS = {1, PERSISTENCE_SCHEMA_VERSION}
+
+
+class _AdaptiveTPIStore(Store):
+    """Storage helper that keeps persisted learning state readable."""
+
+    async def _async_migrate_func(
+        self,
+        old_major_version: int,
+        old_minor_version: int,
+        old_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Keep compatible persisted payloads across storage-version changes."""
+        del old_minor_version
+        if old_major_version == 1:
+            return old_data
+        raise NotImplementedError
 
 
 def _resolve_actuator_mode(entry_infos: dict | None) -> str:
@@ -69,7 +86,7 @@ class AdaptiveTPIHandler:
         self._cancel_temp_listener = None
         storage_key = self._build_storage_key(thermostat.unique_id)
         self._storage_key = storage_key
-        self._store: Store[dict[str, Any]] = Store(
+        self._store: Store[dict[str, Any]] = _AdaptiveTPIStore(
             thermostat.hass,
             PERSISTENCE_SCHEMA_VERSION,
             storage_key,
@@ -394,7 +411,7 @@ class AdaptiveTPIHandler:
             return
 
         schema_version = data.get("schema_version")
-        if schema_version != PERSISTENCE_SCHEMA_VERSION:
+        if schema_version not in _SUPPORTED_PERSISTENCE_SCHEMA_VERSIONS:
             _LOGGER.info(
                 "%s - Ignoring persisted Adaptive TPI state due to unsupported schema version: %s",
                 t,
