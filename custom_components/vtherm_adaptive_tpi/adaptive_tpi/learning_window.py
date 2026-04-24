@@ -206,17 +206,6 @@ def build_anchored_learning_window(
             mode_sign=mode_sign,
         )
         if slid is None:
-            can_grow = (
-                cycle_count < policy.max_cycles
-                and total_duration_min < policy.max_duration_min
-            )
-            if can_grow:
-                return LearningWindowResult(
-                    sample=None,
-                    reason="off_window_waiting_more_signal",
-                    waiting_next_cycle=True,
-                    deadtime_blackout_active=blackout_active,
-                )
             return LearningWindowResult(
                 sample=None,
                 reason="off_window_no_thermal_loss",
@@ -239,17 +228,6 @@ def build_anchored_learning_window(
             mode_sign=mode_sign,
         )
         if slid is None:
-            can_grow = (
-                cycle_count < policy.max_cycles
-                and total_duration_min < policy.max_duration_min
-            )
-            if can_grow:
-                return LearningWindowResult(
-                    sample=None,
-                    reason="on_window_waiting_more_signal",
-                    waiting_next_cycle=True,
-                    deadtime_blackout_active=blackout_active,
-                )
             return LearningWindowResult(
                 sample=None,
                 reason="on_window_no_actuator_effect",
@@ -351,20 +329,20 @@ def _thermal_signal_ready(
         return True, f"{regime}_window_ready", False
 
     if abs_amp >= policy.relaxed_min_amplitude and total_duration_min >= policy.min_duration_min:
-        steps = _count_directional_steps(
+        consecutive = _max_consecutive_directional_steps(
             observations,
             start_index=start_index,
             end_index=end_index,
             mode_sign=mode_sign,
             regime=regime,
         )
-        if steps >= policy.min_directional_steps:
+        if consecutive >= policy.min_directional_steps:
             return True, f"{regime}_window_ready", False
 
     return False, f"{regime}_window_waiting_more_signal", True
 
 
-def _count_directional_steps(
+def _max_consecutive_directional_steps(
     observations: tuple[CycleHistoryEntry, ...],
     *,
     start_index: int,
@@ -372,19 +350,24 @@ def _count_directional_steps(
     mode_sign: int,
     regime: str,
 ) -> int:
-    """Count temperature steps in the thermodynamically correct direction."""
-    # OFF in HEAT: expect tin to decrease → effective_sign = -1 * 1 = -1
-    # ON  in HEAT: expect tin to increase → effective_sign = +1 * 1 = +1
-    # OFF in COOL: expect tin to increase → effective_sign = -1 * -1 = +1
-    # ON  in COOL: expect tin to decrease → effective_sign = +1 * -1 = -1
+    """Return the longest consecutive streak of thermodynamically correct steps.
+
+    Alternating or noisy windows produce a low streak and are rejected in the relaxed band.
+    OFF HEAT: tin must decrease → effective_sign = -1; ON HEAT: increase → +1; mirrored for COOL.
+    """
     regime_sign = -1 if regime == WINDOW_REGIME_OFF else 1
     effective_sign = regime_sign * mode_sign
-    count = 0
+    max_streak = 0
+    streak = 0
     for i in range(start_index, end_index + 1):
         delta = observations[i + 1].tin - observations[i].tin
         if effective_sign * delta > 0:
-            count += 1
-    return count
+            streak += 1
+            if streak > max_streak:
+                max_streak = streak
+        else:
+            streak = 0
+    return max_streak
 
 
 def _find_sliding_start(
