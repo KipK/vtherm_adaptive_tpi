@@ -490,7 +490,7 @@ class AdaptiveTPIHandler:
         payload = {
             "schema_version": PERSISTENCE_SCHEMA_VERSION,
             **metadata,
-            "state": t.prop_algorithm.save_state(),
+            "state": t.prop_algorithm.save_state(cycle_min=float(t.cycle_min)),
         }
         await self._store.async_save(payload)
 

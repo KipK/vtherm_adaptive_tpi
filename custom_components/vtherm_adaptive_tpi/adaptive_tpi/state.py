@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-PERSISTENCE_SCHEMA_VERSION = 2
+PERSISTENCE_SCHEMA_VERSION = 3
 DEFAULT_BOOTSTRAP_PHASE = "startup"
 
 
@@ -57,6 +57,20 @@ def _coerce_str_float_dict(value: Any) -> dict[str, float] | None:
             continue
         cleaned[key] = parsed
     return cleaned
+
+
+def _per_hour(value_per_cycle: float | None, cycle_min: float | None) -> float | None:
+    """Convert a per-cycle value to a per-hour persisted value."""
+    if value_per_cycle is None or cycle_min is None or cycle_min <= 0.0:
+        return None
+    return value_per_cycle * (60.0 / cycle_min)
+
+
+def _minutes(value_cycles: float | None, cycle_min: float | None) -> float | None:
+    """Convert a cycle count to persisted minutes."""
+    if value_cycles is None or cycle_min is None or cycle_min <= 0.0:
+        return None
+    return value_cycles * cycle_min
 
 
 @dataclass(slots=True)
@@ -133,15 +147,17 @@ class AdaptiveTPIState:
     startup_bootstrap_command_on_percent: float | None = None
     startup_bootstrap_completion_reason: str | None = None
 
-    def to_persisted_dict(self) -> dict[str, Any]:
+    def to_persisted_dict(self, *, cycle_min: float | None = None) -> dict[str, Any]:
         """Return the adaptive state that must survive restarts."""
-        return {
+        cycle_min = _coerce_float(cycle_min) or self.cycle_min_at_last_accepted_cycle
+        deadtime_minutes = self.deadtime_minutes
+        if deadtime_minutes is None:
+            deadtime_minutes = _minutes(self.nd_hat, cycle_min)
+        data = {
+            "persistence_units": "time_canonical",
             "k_int": self.k_int,
             "k_ext": self.k_ext,
-            "nd_hat": self.nd_hat,
-            "deadtime_minutes": self.deadtime_minutes,
-            "a_hat": self.a_hat,
-            "b_hat": self.b_hat,
+            "deadtime_minutes": deadtime_minutes,
             "c_nd": self.c_nd,
             "c_a": self.c_a,
             "c_b": self.c_b,
@@ -168,14 +184,35 @@ class AdaptiveTPIState:
             "last_cycle_started_at": self.last_cycle_started_at,
             "last_cycle_completed_at": self.last_cycle_completed_at,
             "deadtime_locked": self.deadtime_locked,
-            "deadtime_best_candidate": self.deadtime_best_candidate,
-            "deadtime_second_best_candidate": self.deadtime_second_best_candidate,
-            "deadtime_b_proxy": self.deadtime_b_proxy,
             "b_crosscheck_error": self.b_crosscheck_error,
             "b_methods_consistent": self.b_methods_consistent,
             "deadtime_identification_qualities": dict(self.deadtime_identification_qualities),
             "last_freeze_reason": self.last_freeze_reason,
         }
+        a_hat_per_hour = _per_hour(self.a_hat, cycle_min)
+        b_hat_per_hour = _per_hour(self.b_hat, cycle_min)
+        deadtime_b_proxy_per_hour = _per_hour(self.deadtime_b_proxy, cycle_min)
+        deadtime_best_candidate_minutes = _minutes(
+            self.deadtime_best_candidate,
+            cycle_min,
+        )
+        deadtime_second_best_candidate_minutes = _minutes(
+            self.deadtime_second_best_candidate,
+            cycle_min,
+        )
+        if a_hat_per_hour is not None:
+            data["a_hat_per_hour"] = a_hat_per_hour
+        if b_hat_per_hour is not None:
+            data["b_hat_per_hour"] = b_hat_per_hour
+        if deadtime_b_proxy_per_hour is not None:
+            data["deadtime_b_proxy_per_hour"] = deadtime_b_proxy_per_hour
+        if deadtime_best_candidate_minutes is not None:
+            data["deadtime_best_candidate_minutes"] = deadtime_best_candidate_minutes
+        if deadtime_second_best_candidate_minutes is not None:
+            data["deadtime_second_best_candidate_minutes"] = (
+                deadtime_second_best_candidate_minutes
+            )
+        return data
 
     def apply_persisted_dict(self, data: Mapping[str, Any]) -> None:
         """Restore persisted values while keeping deterministic fallbacks."""

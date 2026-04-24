@@ -32,6 +32,21 @@ def _clamp(value: float, lower: float, upper: float) -> float:
     return min(max(value, lower), upper)
 
 
+def _valid_cycle_min(cycle_min: float | None) -> bool:
+    """Return True when cycle duration can convert persisted units."""
+    return isinstance(cycle_min, (int, float)) and cycle_min > 0.0
+
+
+def _per_hour(value_per_cycle: float, cycle_min: float) -> float:
+    """Convert a per-cycle estimate to a per-hour persisted value."""
+    return value_per_cycle * (60.0 / cycle_min)
+
+
+def _per_cycle(value_per_hour: float, cycle_min: float) -> float:
+    """Convert a persisted per-hour estimate to a per-cycle runtime value."""
+    return value_per_hour * (cycle_min / 60.0)
+
+
 @dataclass(slots=True)
 class BSample:
     """Window-based thermal loss sample."""
@@ -99,20 +114,33 @@ class _RobustScalarEstimator:
         if bounded > self._lower:
             self._samples.append(bounded)
 
-    def to_persisted_dict(self) -> dict[str, Any]:
+    def to_persisted_dict(self, *, cycle_min: float | None = None) -> dict[str, Any]:
         """Serialize the bounded sample history required for warm starts."""
-        return {
-            "samples": list(self._samples),
+        data: dict[str, Any] = {
             "last_reason": self.last_reason,
         }
+        if _valid_cycle_min(cycle_min):
+            data["samples_per_hour"] = [
+                _per_hour(sample, float(cycle_min)) for sample in self._samples
+            ]
+            data["outlier_candidates_per_hour"] = [
+                _per_hour(candidate, float(cycle_min))
+                for candidate in self._outlier_candidates
+            ]
+        return data
 
-    def load_persisted_dict(self, data: Mapping[str, Any] | None) -> bool:
+    def load_persisted_dict(
+        self,
+        data: Mapping[str, Any] | None,
+        *,
+        cycle_min: float | None = None,
+    ) -> bool:
         """Restore the bounded sample history from persistence."""
         if not isinstance(data, Mapping):
             return False
 
-        raw_samples = data.get("samples")
-        if not isinstance(raw_samples, list):
+        raw_samples = data.get("samples_per_hour")
+        if not isinstance(raw_samples, list) or not _valid_cycle_min(cycle_min):
             return False
 
         cleaned_samples: list[float] = []
@@ -120,13 +148,28 @@ class _RobustScalarEstimator:
             if isinstance(raw_sample, bool):
                 continue
             try:
-                cleaned_samples.append(_clamp(float(raw_sample), self._lower, self._upper))
+                sample = _per_cycle(float(raw_sample), float(cycle_min))
+                cleaned_samples.append(_clamp(sample, self._lower, self._upper))
             except (TypeError, ValueError):
                 continue
 
         self._samples.clear()
         self._samples.extend(cleaned_samples)
         self._outlier_candidates.clear()
+        raw_outlier_candidates = data.get("outlier_candidates_per_hour")
+        if isinstance(raw_outlier_candidates, list) and _valid_cycle_min(cycle_min):
+            for raw_candidate in raw_outlier_candidates[
+                -OUTLIER_REGIME_CONFIRMATION_COUNT:
+            ]:
+                if isinstance(raw_candidate, bool):
+                    continue
+                try:
+                    candidate = _per_cycle(float(raw_candidate), float(cycle_min))
+                    self._outlier_candidates.append(
+                        _clamp(candidate, self._lower, self._upper)
+                    )
+                except (TypeError, ValueError):
+                    continue
 
         last_reason = data.get("last_reason")
         self.last_reason = last_reason if isinstance(last_reason, str) and last_reason else "restored"
@@ -234,20 +277,32 @@ class ParameterEstimator:
         self._b_estimator.restore(self.b_hat, self.c_b)
         self.b_converged = self._compute_b_converged()
 
-    def to_persisted_dict(self) -> dict[str, Any]:
+    def to_persisted_dict(self, *, cycle_min: float | None = None) -> dict[str, Any]:
         """Serialize estimator internals required for warm starts."""
         return {
-            "a_estimator": self._a_estimator.to_persisted_dict(),
-            "b_estimator": self._b_estimator.to_persisted_dict(),
+            "persistence_units": "per_hour",
+            "a_estimator": self._a_estimator.to_persisted_dict(cycle_min=cycle_min),
+            "b_estimator": self._b_estimator.to_persisted_dict(cycle_min=cycle_min),
         }
 
-    def load_persisted_dict(self, data: Mapping[str, Any] | None) -> bool:
+    def load_persisted_dict(
+        self,
+        data: Mapping[str, Any] | None,
+        *,
+        cycle_min: float | None = None,
+    ) -> bool:
         """Restore estimator internals from persistence when available."""
         if not isinstance(data, Mapping):
             return False
 
-        a_restored = self._a_estimator.load_persisted_dict(data.get("a_estimator"))
-        b_restored = self._b_estimator.load_persisted_dict(data.get("b_estimator"))
+        a_restored = self._a_estimator.load_persisted_dict(
+            data.get("a_estimator"),
+            cycle_min=cycle_min,
+        )
+        b_restored = self._b_estimator.load_persisted_dict(
+            data.get("b_estimator"),
+            cycle_min=cycle_min,
+        )
         if not a_restored or not b_restored:
             return False
 

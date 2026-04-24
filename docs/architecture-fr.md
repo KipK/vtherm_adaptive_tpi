@@ -407,7 +407,7 @@ Quand l'état persistant est chargé après une pause :
 
 - **Écart > 30 jours** : les confiances sont réduites de moitié (`decay_confidences(0.5)`). Si `c_nd` tombe en dessous de 0.6, `deadtime_locked` est effacé et la phase est reculée à B.
 - **Écart > 90 jours** : les confiances sont complètement réinitialisées et la phase est reculée à A.
-- **`cycle_min` changé** : le modèle de temps mort est supprimé, les confiances réinitialisées, phase reculée à A (`"cycle_min_changed_revalidation"`).
+- **`cycle_min` changé** : les valeurs persistées de `a` et `b` sont stockées par heure, et le temps mort est stocké en minutes. Au chargement elles sont converties vers la période courante de l'ordonnanceur, en conservant les confiances, les échantillons et la phase.
 
 ---
 
@@ -419,7 +419,7 @@ Quand l'état persistant est chargé après une pause :
 - rapport de dominance du meilleur candidat < 2.0 sur le deuxième meilleur (`"deadtime_insufficient_separation"`)
 - le meilleur candidat a remporté moins de 7 des 10 derniers cycles (`"deadtime_inconsistent_winner"`)
 - décroissance de confiance après > 30 jours réduit `c_nd` en dessous de 0.6
-- réinitialisation complète de confiance (écart > 90 jours, ou changement de `cycle_min`)
+- réinitialisation complète de confiance après un écart > 90 jours
 
 Le diagnostic compact `last_runtime_blocker` nomme toujours le bloqueur actif.
 

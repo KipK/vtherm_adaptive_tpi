@@ -516,12 +516,14 @@ class AdaptiveTPIAlgorithm:
         """Return True when the runtime state has meaningful adaptive history."""
         return self._state.valid_cycles_count > 0 or self._last_accepted_at is not None
 
-    def save_state(self) -> dict:
+    def save_state(self, *, cycle_min: float | None = None) -> dict:
         """Return a persistable algorithm snapshot."""
         return {
-            **self._state.to_persisted_dict(),
-            "deadtime_model": self._deadtime_model.to_persisted_dict(),
-            "estimator_model": self._estimator.to_persisted_dict(),
+            **self._state.to_persisted_dict(cycle_min=cycle_min),
+            "deadtime_model": self._deadtime_model.to_persisted_dict(
+                cycle_min=cycle_min,
+            ),
+            "estimator_model": self._estimator.to_persisted_dict(cycle_min=cycle_min),
             "valve_curve": self._valve_curve.to_persisted_dict(),
         }
 
@@ -583,6 +585,7 @@ class AdaptiveTPIAlgorithm:
             return
         try:
             self._state.apply_persisted_dict(data)
+            self._apply_persisted_time_units(data, current_cycle_min)
             self._last_accepted_at = self._parse_datetime(last_accepted_at)
             should_restore_deadtime = self._apply_persistence_invalidation(
                 current_cycle_min=current_cycle_min,
@@ -590,8 +593,12 @@ class AdaptiveTPIAlgorithm:
                 saved_at=saved_at,
                 last_accepted_at=last_accepted_at,
             )
+            deadtime_restored = False
             if should_restore_deadtime:
-                self._deadtime_model.load_persisted_dict(data.get("deadtime_model"))
+                deadtime_restored = self._deadtime_model.load_persisted_dict(
+                    data.get("deadtime_model"),
+                    cycle_min=current_cycle_min,
+                )
             else:
                 self._deadtime_model.reset()
                 self._state.nd_hat = 0.0
@@ -604,8 +611,12 @@ class AdaptiveTPIAlgorithm:
                 self._state.deadtime_identification_count = 0
                 self._state.deadtime_identification_qualities = {}
                 self._state.deadtime_pending_step = False
-            estimator_restored = should_restore_deadtime and self._estimator.load_persisted_dict(
-                data.get("estimator_model")
+            estimator_restored = (
+                should_restore_deadtime
+                and self._estimator.load_persisted_dict(
+                    data.get("estimator_model"),
+                    cycle_min=current_cycle_min,
+                )
             )
             if not estimator_restored:
                 self._estimator.restore(
@@ -616,11 +627,13 @@ class AdaptiveTPIAlgorithm:
                 )
             if not self._valve_curve.load_persisted_dict(data.get("valve_curve")):
                 persisted_curve = data.get("valve_curve")
-                if isinstance(persisted_curve, Mapping) and persisted_curve.get("actuator_mode"):
+                if isinstance(persisted_curve, Mapping) and persisted_curve.get(
+                    "actuator_mode"
+                ):
                     self._supervisor.last_freeze_reason = "actuator_mode_changed"
             self._valve_curve.set_learning_enabled(self._valve_curve_learning_enabled)
             self._apply_configured_valve_curve_policy(data.get("valve_curve"))
-            if should_restore_deadtime:
+            if deadtime_restored:
                 deadtime_result = self._deadtime_model.last_result
                 self._state.nd_hat = deadtime_result.nd_hat
                 self._state.deadtime_minutes = deadtime_result.nd_minutes
@@ -629,7 +642,9 @@ class AdaptiveTPIAlgorithm:
                 self._state.deadtime_best_candidate = deadtime_result.best_candidate
                 self._state.deadtime_second_best_candidate = deadtime_result.second_best_candidate
                 self._state.deadtime_b_proxy = deadtime_result.best_candidate_b
-                self._state.deadtime_identification_count = len(self._deadtime_model._identifications)
+                self._state.deadtime_identification_count = len(
+                    self._deadtime_model._identifications
+                )
                 self._state.deadtime_identification_qualities = deadtime_result.candidate_costs
                 self._state.deadtime_pending_step = self._deadtime_tracker.has_pending_step
             self._state.a_hat = self._estimator.a_hat
@@ -793,24 +808,13 @@ class AdaptiveTPIAlgorithm:
 
         Returns True when deadtime history may safely be restored.
         """
-        if (
-            isinstance(current_cycle_min, (int, float))
-            and isinstance(persisted_cycle_min, (int, float))
-            and persisted_cycle_min > 0
-            and current_cycle_min > 0
-            and abs(current_cycle_min - persisted_cycle_min) > 1e-9
-        ):
-            ratio = current_cycle_min / persisted_cycle_min
-            self._state.a_hat = max(1e-3, self._state.a_hat * ratio)
-            self._state.b_hat = max(0.0, self._state.b_hat * ratio)
-            self._state.reset_confidences()
-            self._state.bootstrap_phase = PHASE_A
-            self._supervisor.set_phase(PHASE_A)
-            self._supervisor.last_freeze_reason = "cycle_min_changed_revalidation"
-            self._state.last_freeze_reason = self._supervisor.last_freeze_reason
-            return False
+        del persisted_cycle_min
+        if isinstance(current_cycle_min, (int, float)) and current_cycle_min > 0.0:
+            self._state.cycle_min_at_last_accepted_cycle = float(current_cycle_min)
 
-        reference_time = self._parse_datetime(last_accepted_at) or self._parse_datetime(saved_at)
+        reference_time = self._parse_datetime(last_accepted_at) or self._parse_datetime(
+            saved_at
+        )
         if reference_time is None:
             return True
 
@@ -831,6 +835,61 @@ class AdaptiveTPIAlgorithm:
             self._supervisor.last_freeze_reason = "warm_start_confidence_decay"
             self._state.last_freeze_reason = self._supervisor.last_freeze_reason
         return True
+
+    def _apply_persisted_time_units(
+        self,
+        data: Mapping[str, Any],
+        current_cycle_min: float | None,
+    ) -> None:
+        """Convert persisted time-canonical values into runtime cycle units."""
+        if not isinstance(current_cycle_min, (int, float)) or current_cycle_min <= 0.0:
+            return
+        cycle_min = float(current_cycle_min)
+
+        a_hat_per_hour = self._mapping_float(data, "a_hat_per_hour")
+        if a_hat_per_hour is not None:
+            self._state.a_hat = max(1e-3, a_hat_per_hour * cycle_min / 60.0)
+
+        b_hat_per_hour = self._mapping_float(data, "b_hat_per_hour")
+        if b_hat_per_hour is not None:
+            self._state.b_hat = max(0.0, b_hat_per_hour * cycle_min / 60.0)
+
+        if self._state.deadtime_minutes is not None:
+            self._state.nd_hat = self._state.deadtime_minutes / cycle_min
+
+        best_candidate_minutes = self._mapping_float(
+            data,
+            "deadtime_best_candidate_minutes",
+        )
+        if best_candidate_minutes is not None:
+            self._state.deadtime_best_candidate = best_candidate_minutes / cycle_min
+
+        second_best_candidate_minutes = self._mapping_float(
+            data,
+            "deadtime_second_best_candidate_minutes",
+        )
+        if second_best_candidate_minutes is not None:
+            self._state.deadtime_second_best_candidate = (
+                second_best_candidate_minutes / cycle_min
+            )
+
+        deadtime_b_proxy_per_hour = self._mapping_float(
+            data,
+            "deadtime_b_proxy_per_hour",
+        )
+        if deadtime_b_proxy_per_hour is not None:
+            self._state.deadtime_b_proxy = deadtime_b_proxy_per_hour * cycle_min / 60.0
+
+    @staticmethod
+    def _mapping_float(data: Mapping[str, Any], key: str) -> float | None:
+        """Return one numeric mapping value as float."""
+        value = data.get(key)
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _parse_datetime(value: str | None) -> datetime | None:

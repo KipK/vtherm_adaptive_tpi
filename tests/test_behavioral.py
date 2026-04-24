@@ -77,6 +77,7 @@ from custom_components.vtherm_adaptive_tpi.adaptive_tpi.supervisor import (
     PHASE_A,
     PHASE_B,
     PHASE_C,
+    PHASE_D,
 )
 
 
@@ -1659,10 +1660,10 @@ def test_deadtime_persistence_roundtrip() -> None:
     model._last_processed_step_index = 10
     model._recompute_nd_hat()
 
-    saved = model.to_persisted_dict()
+    saved = model.to_persisted_dict(cycle_min=11.7 / 2.3)
 
     model2 = DeadtimeModel()
-    model2.load_persisted_dict(saved)
+    model2.load_persisted_dict(saved, cycle_min=11.7 / 2.3)
 
     assert len(model2._identifications) == 1
     assert model2._identifications[0].nd_cycles == pytest.approx(2.3)
@@ -2957,33 +2958,78 @@ def test_reset_learning_restores_fresh_bootstrap_defaults() -> None:
     assert diagnostics["debug"]["deadtime_locked"] is False
 
 
-def test_cycle_min_change_invalidates_persisted_warm_start() -> None:
-    """A cycle duration change should rescale estimates and re-enter Phase A."""
+def test_cycle_min_change_converts_persisted_warm_start() -> None:
+    """A cycle duration change should preserve learned state in the new cycle units."""
     algo = AdaptiveTPIAlgorithm(name="test-persistence", debug_mode=True)
-    algo._state.deadtime_locked = True
-    algo._state.deadtime_identification_qualities = {"1": 0.1}
-    algo._state.deadtime_best_candidate = 1.0
+    algo._state.bootstrap_phase = PHASE_D
+    algo._state.cycle_min_at_last_accepted_cycle = 5.0
 
-    algo.load_state(
-        {
-            "k_int": 0.6,
-            "k_ext": 0.01,
-            "nd_hat": 1.0,
-            "a_hat": 0.1,
-            "b_hat": 0.02,
-            "bootstrap_phase": "phase_d",
-        },
-        current_cycle_min=10.0,
-        persisted_cycle_min=5.0,
+    algo._deadtime_model._identifications.append(
+        StepIdentification(
+            nd_cycles=2.0,
+            nd_minutes=10.0,
+            quality=0.85,
+            b_proxy=0.02,
+            cycle_index=3,
+        )
     )
+    algo._deadtime_model.evaluate()
 
-    diagnostics = algo.get_diagnostics()
-    assert diagnostics["adaptive_phase"] == "deadtime_learning"
-    assert diagnostics["debug"]["a_hat"] == pytest.approx(0.2)
-    assert diagnostics["debug"]["b_hat"] == pytest.approx(0.04)
-    assert diagnostics["last_runtime_blocker"] == "cycle_min_changed_revalidation"
-    assert diagnostics["debug"]["deadtime_locked"] is False
-    assert diagnostics["debug"]["deadtime_identification_qualities"] == {}
+    for measurement in (0.0200, 0.0210, 0.0220, 0.0230, 0.0225, 0.0215):
+        algo._estimator._b_estimator.push(measurement)
+    algo._estimator.b_hat = algo._estimator._b_estimator.estimate
+    algo._estimator.c_b = algo._estimator._b_estimator.confidence
+    algo._estimator.b_converged = algo._estimator._compute_b_converged()
+
+    for measurement in (0.100, 0.110, 0.120, 0.115, 0.105, 0.125):
+        algo._estimator._a_estimator.push(measurement)
+    algo._estimator.a_hat = algo._estimator._a_estimator.estimate
+    algo._estimator.c_a = algo._estimator._a_estimator.confidence
+
+    deadtime_result = algo._deadtime_model.last_result
+    algo._state.nd_hat = deadtime_result.nd_hat
+    algo._state.deadtime_minutes = deadtime_result.nd_minutes
+    algo._state.c_nd = deadtime_result.c_nd
+    algo._state.deadtime_locked = deadtime_result.locked
+    algo._state.deadtime_best_candidate = deadtime_result.best_candidate
+    algo._state.deadtime_second_best_candidate = deadtime_result.second_best_candidate
+    algo._state.deadtime_b_proxy = deadtime_result.best_candidate_b
+    algo._state.deadtime_identification_count = len(
+        algo._deadtime_model._identifications
+    )
+    algo._state.deadtime_identification_qualities = deadtime_result.candidate_costs
+    algo._state.a_hat = algo._estimator.a_hat
+    algo._state.b_hat = algo._estimator.b_hat
+    algo._state.c_a = algo._estimator.c_a
+    algo._state.c_b = algo._estimator.c_b
+    algo._state.b_converged = algo._estimator.b_converged
+
+    saved = algo.save_state(cycle_min=5.0)
+    assert saved["a_hat_per_hour"] == pytest.approx(algo._state.a_hat * 12.0)
+    assert saved["b_hat_per_hour"] == pytest.approx(algo._state.b_hat * 12.0)
+    assert saved["deadtime_model"]["identifications"][0]["nd_minutes"] == pytest.approx(
+        10.0
+    )
+    assert saved["deadtime_model"]["identifications"][0][
+        "b_proxy_per_hour"
+    ] == pytest.approx(0.24)
+    restored = AdaptiveTPIAlgorithm(name="test-persistence-restore", debug_mode=True)
+    restored.load_state(saved, current_cycle_min=10.0, persisted_cycle_min=5.0)
+
+    diagnostics = restored.get_diagnostics()
+    assert diagnostics["adaptive_phase"] == "stabilized"
+    assert diagnostics["deadtime_cycles"] == pytest.approx(1.0)
+    assert diagnostics["deadtime_minutes"] == pytest.approx(10.0)
+    assert diagnostics["control_samples"] == 6
+    assert diagnostics["drift_samples"] == 6
+    assert diagnostics["debug"]["a_hat"] == pytest.approx(algo._state.a_hat * 2.0)
+    assert diagnostics["debug"]["b_hat"] == pytest.approx(algo._state.b_hat * 2.0)
+    assert diagnostics["debug"]["deadtime_b_proxy"] == pytest.approx(0.04)
+    assert diagnostics["debug"]["cycle_min_at_last_accepted_cycle"] == pytest.approx(
+        10.0
+    )
+    assert diagnostics["debug"]["deadtime_locked"] is True
+    assert diagnostics["last_runtime_blocker"] is None
 
 
 def test_warm_start_restores_deadtime_model_and_candidate_costs() -> None:
@@ -3012,7 +3058,7 @@ def test_warm_start_restores_deadtime_model_and_candidate_costs() -> None:
     algo._state.c_a = 0.8
     algo._state.c_b = 0.8
 
-    saved = algo.save_state()
+    saved = algo.save_state(cycle_min=5.0)
 
     restored = AdaptiveTPIAlgorithm(
         name="test-deadtime-persistence-restore", debug_mode=True
@@ -3063,7 +3109,13 @@ def test_warm_start_restores_estimator_history_and_keeps_adaptive_gains() -> Non
     algo._state.k_int = 0.42
     algo._state.k_ext = 0.03
 
-    saved = algo.save_state()
+    saved = algo.save_state(cycle_min=5.0)
+    assert saved["estimator_model"]["a_estimator"]["samples_per_hour"] == pytest.approx(
+        [sample * 12.0 for sample in a_samples]
+    )
+    assert saved["estimator_model"]["b_estimator"]["samples_per_hour"] == pytest.approx(
+        [sample * 12.0 for sample in b_samples]
+    )
 
     restored = AdaptiveTPIAlgorithm(
         name="test-estimator-persistence-restore", debug_mode=True

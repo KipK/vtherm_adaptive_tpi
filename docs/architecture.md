@@ -410,7 +410,7 @@ When persistent state is loaded after a gap:
 
 - **Gap > 30 days**: confidences are halved (`decay_confidences(0.5)`). If `c_nd` falls below 0.6, `deadtime_locked` is cleared and the phase is stepped back to B.
 - **Gap > 90 days**: confidences are fully reset and the phase is stepped back to A.
-- **`cycle_min` changed**: deadtime model is discarded, confidences reset, phase stepped back to A (`"cycle_min_changed_revalidation"`).
+- **`cycle_min` changed**: persisted `a` and `b` values are stored per hour, and deadtime is stored in minutes. On load they are converted to the current scheduler period while preserving confidences, samples, and phase.
 
 ---
 
@@ -422,7 +422,7 @@ When persistent state is loaded after a gap:
 - best-candidate dominance ratio < 2.0 over the second-best (`"deadtime_insufficient_separation"`)
 - best candidate won fewer than 7 of the last 10 cycles (`"deadtime_inconsistent_winner"`)
 - confidence decay after > 30 days drops `c_nd` below 0.6
-- full confidence reset (gap > 90 days, or `cycle_min` change)
+- full confidence reset after a gap > 90 days
 
 The compact `last_runtime_blocker` diagnostic always names the active blocker.
 

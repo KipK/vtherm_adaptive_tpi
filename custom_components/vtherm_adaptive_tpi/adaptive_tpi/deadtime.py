@@ -120,6 +120,21 @@ def _weighted_median(values: list[float], weights: list[float]) -> float:
     return sorted_pairs[-1][0]
 
 
+def _valid_cycle_min(cycle_min: float | None) -> bool:
+    """Return True when cycle duration can convert persisted units."""
+    return isinstance(cycle_min, (int, float)) and cycle_min > 0.0
+
+
+def _per_hour(value_per_cycle: float, cycle_min: float) -> float:
+    """Convert a per-cycle estimate to a per-hour persisted value."""
+    return value_per_cycle * (60.0 / cycle_min)
+
+
+def _per_cycle(value_per_hour: float, cycle_min: float) -> float:
+    """Convert a persisted per-hour estimate to a per-cycle runtime value."""
+    return value_per_hour * (cycle_min / 60.0)
+
+
 def _select_identification_for_nd_hat(
     identifications: list[StepIdentification],
     nd_hat: float,
@@ -501,49 +516,52 @@ class DeadtimeModel:
             if self._pending_step_index < 0:
                 self._pending_step_index = None
 
-    def to_persisted_dict(self) -> dict[str, Any]:
+    def to_persisted_dict(self, *, cycle_min: float | None = None) -> dict[str, Any]:
         """Serialize identified deadtimes for warm restarts."""
         return {
+            "persistence_units": "time_canonical",
             "identifications": [
-                {
-                    "nd_cycles": ident.nd_cycles,
-                    "nd_minutes": ident.nd_minutes,
-                    "quality": ident.quality,
-                    "b_proxy": ident.b_proxy,
-                    "cycle_index": ident.cycle_index,
-                }
+                self._identification_to_persisted_dict(
+                    ident,
+                    cycle_min=cycle_min,
+                )
                 for ident in self._identifications
             ],
             "last_processed_step_index": self._last_processed_step_index,
         }
 
-    def load_persisted_dict(self, data: Mapping[str, Any] | None) -> None:
+    def load_persisted_dict(
+        self,
+        data: Mapping[str, Any] | None,
+        *,
+        cycle_min: float | None = None,
+    ) -> bool:
         """Restore identifications from a persisted snapshot."""
         self.reset()
         if not isinstance(data, Mapping):
-            return
+            return False
         # Silently discard the old candidate-regression format
         if "cycle_history" in data:
-            return
+            return False
 
         raw_idents = data.get("identifications", [])
         if isinstance(raw_idents, list):
             for raw in raw_idents:
-                if not isinstance(raw, Mapping):
+                if not isinstance(raw, Mapping) or not _valid_cycle_min(cycle_min):
                     continue
                 try:
-                    b_raw = raw.get("b_proxy")
-                    nd_minutes_raw = raw.get("nd_minutes")
+                    b_per_hour_raw = raw.get("b_proxy_per_hour")
+                    nd_minutes = float(raw["nd_minutes"])
+                    nd_cycles = nd_minutes / float(cycle_min)
+                    b_proxy = None
+                    if b_per_hour_raw is not None:
+                        b_proxy = _per_cycle(float(b_per_hour_raw), float(cycle_min))
                     self._identifications.append(
                         StepIdentification(
-                            nd_cycles=float(raw["nd_cycles"]),
-                            nd_minutes=(
-                                float(nd_minutes_raw)
-                                if nd_minutes_raw is not None
-                                else None
-                            ),
+                            nd_cycles=nd_cycles,
+                            nd_minutes=nd_minutes,
                             quality=float(raw["quality"]),
-                            b_proxy=float(b_raw) if b_raw is not None else None,
+                            b_proxy=b_proxy,
                             cycle_index=int(raw.get("cycle_index", 0)),
                         )
                     )
@@ -556,3 +574,29 @@ class DeadtimeModel:
 
         if self._identifications:
             self.last_result = self._recompute_nd_hat()
+            return True
+        return False
+
+    @staticmethod
+    def _identification_to_persisted_dict(
+        identification: StepIdentification,
+        *,
+        cycle_min: float | None,
+    ) -> dict[str, Any]:
+        """Serialize one identification in time-canonical units."""
+        nd_minutes = identification.nd_minutes
+        if nd_minutes is None and _valid_cycle_min(cycle_min):
+            nd_minutes = identification.nd_cycles * float(cycle_min)
+
+        data: dict[str, Any] = {
+            "quality": identification.quality,
+            "cycle_index": identification.cycle_index,
+        }
+        if nd_minutes is not None:
+            data["nd_minutes"] = nd_minutes
+        if identification.b_proxy is not None and _valid_cycle_min(cycle_min):
+            data["b_proxy_per_hour"] = _per_hour(
+                identification.b_proxy,
+                float(cycle_min),
+            )
+        return data
