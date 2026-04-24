@@ -116,7 +116,11 @@ class AdaptiveTPIAlgorithm:
         applied_power = max(0.0, min(1.0, float(e_eff)))
         if abs(applied_power - sample.applied_power) <= 1e-9:
             return sample
-        return replace(sample, applied_power=applied_power, applied_demand=applied_power)
+        return replace(
+            sample,
+            applied_power=applied_power,
+            applied_demand=self._valve_curve.invert(applied_power),
+        )
 
     def calculate(
         self,
@@ -183,7 +187,7 @@ class AdaptiveTPIAlgorithm:
         if bootstrap_snapshot.command_on_percent is not None:
             command_on_percent = bootstrap_snapshot.command_on_percent
         self._state.calculated_on_percent = command_on_percent
-        self._state.requested_on_percent = command_on_percent
+        self._state.requested_on_percent = self._valve_curve.apply(command_on_percent)
 
     def update_realized_power(self, power_percent: float) -> None:
         """Record the power committed for the current scheduler cycle."""
@@ -205,7 +209,7 @@ class AdaptiveTPIAlgorithm:
         self._state.last_cycle_started_at = self._utc_now().isoformat()
         previous_committed_on_percent = self._state.committed_on_percent
         self.update_realized_power(on_percent)
-        applied_demand = self._state.committed_on_percent
+        applied_demand = self._valve_curve.invert(self._state.committed_on_percent)
         if target_temp is None or current_temp is None or ext_current_temp is None:
             self._pending_cycle_sample = None
             return

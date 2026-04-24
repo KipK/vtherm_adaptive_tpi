@@ -162,11 +162,11 @@ def test_two_slope_valve_curve_rejects_invalid_parameters() -> None:
         )
 
 
-def test_valve_mode_keeps_runtime_command_identity_for_now() -> None:
-    """Valve mode scaffolding must not change VT command semantics yet."""
+def test_switch_mode_keeps_runtime_command_identity() -> None:
+    """Switch mode must keep identical linear and requested commands."""
     algo = AdaptiveTPIAlgorithm(
-        name="test-valve-command-identity",
-        actuator_mode=ACTUATOR_MODE_VALVE,
+        name="test-switch-command-identity",
+        actuator_mode=ACTUATOR_MODE_SWITCH,
     )
     algo.calculate(
         target_temp=20.0,
@@ -176,6 +176,50 @@ def test_valve_mode_keeps_runtime_command_identity_for_now() -> None:
         hvac_mode="heat",
     )
     assert algo.requested_on_percent == pytest.approx(algo.calculated_on_percent)
+
+
+def test_valve_mode_applies_curve_to_requested_command() -> None:
+    """Valve mode must expose actuator command in the valve position space."""
+    algo = AdaptiveTPIAlgorithm(
+        name="test-valve-command-curve",
+        actuator_mode=ACTUATOR_MODE_VALVE,
+    )
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=19.5,
+        ext_current_temp=10.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    assert algo.calculated_on_percent == pytest.approx(0.31)
+    assert algo.requested_on_percent == pytest.approx(0.101)
+
+
+def test_valve_mode_cycle_samples_store_linearized_applied_demand() -> None:
+    """Valve mode cycle samples must keep actuator power and model demand separate."""
+    algo = AdaptiveTPIAlgorithm(
+        name="test-valve-cycle-demand",
+        actuator_mode=ACTUATOR_MODE_VALVE,
+    )
+
+    algo.on_cycle_started(
+        on_time_sec=180.0,
+        off_time_sec=120.0,
+        on_percent=0.15,
+        hvac_mode="heat",
+        target_temp=21.0,
+        current_temp=20.0,
+        ext_current_temp=10.0,
+    )
+
+    pending = algo._pending_cycle_sample
+    assert pending is not None
+    assert pending.applied_power == pytest.approx(0.15)
+    assert pending.applied_demand == pytest.approx(0.80)
+
+    completed = algo._resolve_completed_cycle_sample(pending, 0.101)
+    assert completed.applied_power == pytest.approx(0.101)
+    assert completed.applied_demand == pytest.approx(0.31)
 
 
 def test_startup_with_no_history_keeps_bootstrap_defaults() -> None:
