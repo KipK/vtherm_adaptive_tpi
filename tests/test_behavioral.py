@@ -384,6 +384,65 @@ def test_valve_mode_cycle_samples_store_linearized_applied_demand() -> None:
     assert completed.applied_demand == pytest.approx(0.31)
 
 
+def test_valve_curve_learning_accepts_stable_mixed_cycles_without_a_update() -> None:
+    """Mixed valve cycles should feed curve learning without opening A learning."""
+    algo = AdaptiveTPIAlgorithm(
+        name="test-valve-curve-mixed-learning",
+        actuator_mode=ACTUATOR_MODE_VALVE,
+        debug_mode=True,
+    )
+    algo._state.a_hat = 0.4
+    algo._state.b_hat = 0.001
+    algo._state.b_converged = True
+    mixed_valve_position = algo._valve_curve.apply(0.18)
+
+    algo.on_cycle_started(
+        on_time_sec=60.0,
+        off_time_sec=240.0,
+        on_percent=mixed_valve_position,
+        hvac_mode="heat",
+        target_temp=21.0,
+        current_temp=20.0,
+        ext_current_temp=10.0,
+    )
+    algo.on_cycle_completed(
+        elapsed_ratio=1.0,
+        cycle_duration_min=5.0,
+        measure_timestamp=datetime(2026, 4, 24, tzinfo=timezone.utc),
+        target_temp=21.0,
+        current_temp=20.05,
+        ext_current_temp=10.0,
+        hvac_mode="heat",
+    )
+
+    algo.on_cycle_started(
+        on_time_sec=60.0,
+        off_time_sec=240.0,
+        on_percent=mixed_valve_position,
+        hvac_mode="heat",
+        target_temp=21.0,
+        current_temp=20.05,
+        ext_current_temp=10.0,
+    )
+    algo.on_cycle_completed(
+        elapsed_ratio=1.0,
+        cycle_duration_min=5.0,
+        measure_timestamp=datetime(2026, 4, 24, 0, 5, tzinfo=timezone.utc),
+        target_temp=21.0,
+        current_temp=20.12,
+        ext_current_temp=10.0,
+        hvac_mode="heat",
+    )
+
+    diagnostics = algo.get_diagnostics()
+    assert diagnostics["debug"]["current_cycle_regime"] == WINDOW_REGIME_MIXED
+    assert diagnostics["debug"]["learning_route_selected"] == "none"
+    assert diagnostics["last_learning_result"] == "mixed_cycle_regime"
+    assert diagnostics["valve_curve_observations_accepted"] == 1
+    assert diagnostics["valve_curve_last_reason"] == "sample_accepted"
+    assert diagnostics["control_samples"] == 0
+
+
 def test_startup_with_no_history_keeps_bootstrap_defaults() -> None:
     """Fresh runtime should expose deterministic startup diagnostics."""
     algo = AdaptiveTPIAlgorithm(name="test-startup")

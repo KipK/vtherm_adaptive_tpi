@@ -379,6 +379,7 @@ class AdaptiveTPIAlgorithm:
         current_cycle_regime = self._state.current_cycle_regime
         a_hat_for_valve_curve = self._state.a_hat
         on_window = None
+        valve_curve_window = None
 
         observations = self._learning_observations_with_terminal(
             target_temp=target_temp,
@@ -450,10 +451,19 @@ class AdaptiveTPIAlgorithm:
                 )
                 self._state.last_learning_attempt_reason = self._state.learning_route_block_reason
                 self._state.a_last_reason = self._state.learning_route_block_reason
+            valve_curve_window = on_window
         else:
             self._state.last_learning_attempt_regime = None
             self._state.last_learning_attempt_reason = "mixed_cycle_regime"
             self._state.learning_route_block_reason = "mixed_cycle_regime"
+            if self._actuator_mode == ACTUATOR_MODE_VALVE:
+                valve_curve_window = build_anchored_learning_window(
+                    observations,
+                    nd_hat=self._state.nd_hat,
+                    regime=WINDOW_REGIME_MIXED,
+                    end_index=anchored_end_index,
+                    mode_sign=pending_mode_sign,
+                )
 
         if estimator_update is not None:
             self._apply_estimator_update(estimator_update)
@@ -469,14 +479,14 @@ class AdaptiveTPIAlgorithm:
         self._refresh_b_crosscheck()
         if (
             self._actuator_mode == ACTUATOR_MODE_VALVE
-            and current_cycle_regime == WINDOW_REGIME_ON
-            and on_window is not None
-            and on_window.sample is not None
+            and current_cycle_regime in (WINDOW_REGIME_ON, WINDOW_REGIME_MIXED)
+            and valve_curve_window is not None
+            and valve_curve_window.sample is not None
         ):
             self._valve_curve.observe(
                 u_valve=completed_cycle.applied_power,
-                dTdt=on_window.sample.dTdt,
-                delta_out=on_window.sample.delta_out,
+                dTdt=valve_curve_window.sample.dTdt,
+                delta_out=valve_curve_window.sample.delta_out,
                 a_hat=a_hat_for_valve_curve,
                 b_hat=self._state.b_hat,
                 b_converged=self._state.b_converged,
