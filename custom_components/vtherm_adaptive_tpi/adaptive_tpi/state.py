@@ -110,6 +110,12 @@ class AdaptiveTPIState:
     deadtime_pending_step: bool = False
     actuator_mode: str = "switch"
     valve_curve_params: dict[str, float] | None = None
+    valve_curve_learning_enabled: bool = False
+    valve_curve_converged: bool = False
+    valve_curve_observations_accepted: int = 0
+    valve_curve_observations_rejected: int = 0
+    valve_curve_rejected_updates: int = 0
+    valve_curve_last_reason: str | None = None
     # These routing diagnostics describe the latest runtime decision only.
     # They are intentionally kept out of persistence so restarts do not restore
     # stale branch-selection information as if it were still current.

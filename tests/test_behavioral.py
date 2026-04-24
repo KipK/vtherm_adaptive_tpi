@@ -11,8 +11,17 @@ import pytest
 
 from custom_components.vtherm_adaptive_tpi.algo import AdaptiveTPIAlgorithm
 from custom_components.vtherm_adaptive_tpi.const import (
+    ACTUATOR_MODE_AUTO,
     ACTUATOR_MODE_SWITCH,
     ACTUATOR_MODE_VALVE,
+    CONF_VALVE_KNEE_DEMAND,
+    CONF_VALVE_KNEE_VALVE,
+    CONF_VALVE_MAX_VALVE,
+    CONF_VALVE_MIN_VALVE,
+)
+from custom_components.vtherm_adaptive_tpi.config_flow import (
+    ERROR_INVALID_VALVE_CURVE,
+    _validate_valve_curve_config,
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.controller import (
     compute_gain_targets,
@@ -22,6 +31,7 @@ from custom_components.vtherm_adaptive_tpi.handler import (
     AdaptiveTPIHandler,
     _AdaptiveTPIStore,
     _resolve_actuator_mode,
+    _resolve_effective_actuator_mode,
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.state import (
     PERSISTENCE_SCHEMA_VERSION,
@@ -131,6 +141,50 @@ def test_resolve_actuator_mode_from_entry_infos() -> None:
     )
 
 
+def test_resolve_effective_actuator_mode_prefers_override() -> None:
+    """A configured override must take precedence over auto-detection."""
+    assert (
+        _resolve_effective_actuator_mode(
+            {"actuator_mode_override": ACTUATOR_MODE_SWITCH},
+            {"thermostat_type": "thermostat_over_valve"},
+        )
+        == ACTUATOR_MODE_SWITCH
+    )
+    assert (
+        _resolve_effective_actuator_mode(
+            {"actuator_mode_override": ACTUATOR_MODE_AUTO},
+            {"thermostat_type": "thermostat_over_valve"},
+        )
+        == ACTUATOR_MODE_VALVE
+    )
+
+
+def test_validate_valve_curve_config_rejects_invalid_breakpoint_order() -> None:
+    """Valve curve form validation should reject ambiguous breakpoint ordering."""
+    assert (
+        _validate_valve_curve_config(
+            {
+                CONF_VALVE_MIN_VALVE: 7.0,
+                CONF_VALVE_KNEE_DEMAND: 80.0,
+                CONF_VALVE_KNEE_VALVE: 15.0,
+                CONF_VALVE_MAX_VALVE: 100.0,
+            }
+        )
+        == {}
+    )
+
+    errors = _validate_valve_curve_config(
+        {
+            CONF_VALVE_MIN_VALVE: 20.0,
+            CONF_VALVE_KNEE_DEMAND: 80.0,
+            CONF_VALVE_KNEE_VALVE: 10.0,
+            CONF_VALVE_MAX_VALVE: 100.0,
+        }
+    )
+
+    assert errors == {"base": ERROR_INVALID_VALVE_CURVE}
+
+
 def test_identity_valve_curve_is_strictly_linear() -> None:
     """Switch actuators keep the existing linear command space."""
     curve = IdentityValveCurve()
@@ -162,6 +216,109 @@ def test_two_slope_valve_curve_rejects_invalid_parameters() -> None:
         )
 
 
+def test_two_slope_valve_curve_learning_converges_toward_observed_curve() -> None:
+    """Bounded online learning should move the curve toward a consistent valve response."""
+    learned_curve = TwoSlopeValveCurve(VALVE_CURVE_DEFAULTS, learning_enabled=True)
+    true_curve = TwoSlopeValveCurve(
+        ValveCurveParams(
+            min_valve=10.0,
+            knee_demand=70.0,
+            knee_valve=25.0,
+            max_valve=92.0,
+        ),
+        learning_enabled=True,
+    )
+    a_hat = 0.4
+    b_hat = 0.02
+    delta_out = 5.0
+
+    for demand in (
+        0.12,
+        0.18,
+        0.24,
+        0.30,
+        0.36,
+        0.42,
+        0.48,
+        0.54,
+        0.60,
+        0.66,
+        0.72,
+        0.78,
+        0.84,
+        0.90,
+        0.96,
+        0.20,
+        0.40,
+        0.62,
+        0.74,
+        0.88,
+    ):
+        learned_curve.observe(
+            u_valve=true_curve.apply(demand),
+            dTdt=a_hat * demand - b_hat * delta_out,
+            delta_out=delta_out,
+            a_hat=a_hat,
+            b_hat=b_hat,
+            b_converged=True,
+            mode_sign=1,
+        )
+
+    params = learned_curve.params
+    assert learned_curve.observations_accepted_count == 20
+    assert learned_curve.observations_rejected_count == 0
+    assert learned_curve.is_converged is True
+    assert 1.0 <= params.min_valve < params.knee_valve < params.max_valve <= 100.0
+    assert 0.0 < params.knee_demand < 100.0
+    for demand in (0.20, 0.40, 0.80, 0.95):
+        assert learned_curve.apply(demand) == pytest.approx(
+            true_curve.apply(demand),
+            abs=0.06,
+        )
+
+
+def test_two_slope_valve_curve_persists_learning_history_and_counters() -> None:
+    """Curve persistence should keep observations and diagnostics counters."""
+    curve = TwoSlopeValveCurve(VALVE_CURVE_DEFAULTS, learning_enabled=True)
+    curve.observe(
+        u_valve=0.20,
+        dTdt=0.10,
+        delta_out=5.0,
+        a_hat=0.4,
+        b_hat=0.02,
+        b_converged=True,
+        mode_sign=1,
+        timestamp="2026-04-24T12:00:00+00:00",
+    )
+
+    restored = TwoSlopeValveCurve(VALVE_CURVE_DEFAULTS, learning_enabled=False)
+    assert restored.load_persisted_dict(curve.to_persisted_dict()) is True
+
+    assert restored.learning_enabled is True
+    assert restored.observations_accepted_count == 1
+    assert restored.observations_rejected_count == 0
+    assert restored.last_reason == "sample_accepted"
+
+
+def test_two_slope_valve_curve_cooling_formula_matches_estimator_signs() -> None:
+    """Cooling observations should use the same signed power proxy as the estimator."""
+    curve = TwoSlopeValveCurve(VALVE_CURVE_DEFAULTS, learning_enabled=True)
+    curve.observe(
+        u_valve=0.20,
+        dTdt=-0.20,
+        delta_out=5.0,
+        a_hat=0.4,
+        b_hat=0.02,
+        b_converged=True,
+        mode_sign=-1,
+    )
+
+    assert curve.observations_accepted_count == 1
+    assert curve.last_reason == "sample_accepted"
+    persisted = curve.to_persisted_dict()
+    assert persisted["observations"][0]["u_linear_equiv"] == pytest.approx(0.25)
+
+
 def test_switch_mode_keeps_runtime_command_identity() -> None:
     """Switch mode must keep identical linear and requested commands."""
     algo = AdaptiveTPIAlgorithm(
@@ -184,6 +341,7 @@ def test_valve_mode_applies_curve_to_requested_command() -> None:
         name="test-valve-command-curve",
         actuator_mode=ACTUATOR_MODE_VALVE,
     )
+    algo._state.deadtime_identification_count = 1
     algo.calculate(
         target_temp=20.0,
         current_temp=19.5,
@@ -191,8 +349,12 @@ def test_valve_mode_applies_curve_to_requested_command() -> None:
         slope=None,
         hvac_mode="heat",
     )
-    assert algo.calculated_on_percent == pytest.approx(0.31)
-    assert algo.requested_on_percent == pytest.approx(0.101)
+    expected_requested = TwoSlopeValveCurve(VALVE_CURVE_DEFAULTS).apply(
+        algo.calculated_on_percent
+    )
+    assert algo.calculated_on_percent == pytest.approx(0.5)
+    assert algo.requested_on_percent == pytest.approx(expected_requested)
+    assert algo.requested_on_percent != pytest.approx(algo.calculated_on_percent)
 
 
 def test_valve_mode_cycle_samples_store_linearized_applied_demand() -> None:
@@ -969,6 +1131,32 @@ async def test_service_reset_learning_recalculates_before_forced_control() -> No
     thermostat.async_write_ha_state.assert_called_once_with()
 
 
+@pytest.mark.asyncio
+async def test_service_reset_valve_curve_recalculates_before_forced_control() -> None:
+    """Valve curve reset should realign thermostat-side state before forcing cycle control."""
+    thermostat = SimpleNamespace(
+        prop_algorithm=SimpleNamespace(reset_valve_curve=MagicMock()),
+        recalculate=MagicMock(),
+        async_control_heating=AsyncMock(),
+        async_write_ha_state=MagicMock(),
+    )
+    handler = object.__new__(AdaptiveTPIHandler)
+    handler._thermostat = thermostat
+    handler._async_save_persisted_state = AsyncMock()
+    handler._refresh_published_diagnostics = MagicMock()
+    handler.update_attributes = MagicMock()
+
+    await handler.service_reset_valve_curve()
+
+    thermostat.prop_algorithm.reset_valve_curve.assert_called_once_with()
+    handler._async_save_persisted_state.assert_awaited_once_with()
+    handler._refresh_published_diagnostics.assert_called_once_with()
+    thermostat.recalculate.assert_called_once_with(force=True)
+    thermostat.async_control_heating.assert_awaited_once_with(force=True)
+    handler.update_attributes.assert_called_once_with()
+    thermostat.async_write_ha_state.assert_called_once_with()
+
+
 def test_diagnostics_expose_normalized_units_when_cycle_duration_is_known() -> None:
     """Diagnostics should expose user-facing normalized units in addition to per-cycle values."""
     algo = AdaptiveTPIAlgorithm(name="test-diag-units")
@@ -997,6 +1185,33 @@ def test_diagnostics_publish_measured_deadtime_minutes_when_available() -> None:
 
     assert diagnostics["deadtime_minutes"] == pytest.approx(11.5)
     assert diagnostics["debug"]["deadtime_min"] == pytest.approx(11.5)
+
+
+def test_diagnostics_expose_valve_curve_learning_state() -> None:
+    """Diagnostics should surface valve curve learning counters and status."""
+    algo = AdaptiveTPIAlgorithm(
+        name="test-valve-curve-diagnostics",
+        actuator_mode=ACTUATOR_MODE_VALVE,
+        debug_mode=True,
+    )
+    algo._valve_curve.observe(
+        u_valve=0.20,
+        dTdt=0.10,
+        delta_out=5.0,
+        a_hat=0.4,
+        b_hat=0.02,
+        b_converged=True,
+        mode_sign=1,
+    )
+    algo._refresh_valve_curve_state()
+
+    diagnostics = algo.get_diagnostics()
+    assert diagnostics["actuator_mode"] == ACTUATOR_MODE_VALVE
+    assert diagnostics["valve_curve_learning_enabled"] is True
+    assert diagnostics["valve_curve_observations_accepted"] == 1
+    assert diagnostics["valve_curve_observations_rejected"] == 0
+    assert diagnostics["valve_curve_last_reason"] == "sample_accepted"
+    assert diagnostics["debug"]["valve_curve_learning_enabled"] is True
 
 
 def test_invalid_temperature_data_rejects_cycle_and_disables_output() -> None:
@@ -2812,6 +3027,62 @@ def test_warm_start_restores_estimator_history_and_keeps_adaptive_gains() -> Non
     assert diagnostics["debug"]["control_rate_converged"] is True
     assert diagnostics["gain_indoor"] != pytest.approx(0.6)
     assert diagnostics["gain_outdoor"] != pytest.approx(0.01)
+
+
+def test_load_state_reapplies_configured_valve_curve_when_learning_disabled() -> None:
+    """Configured valve parameters must win over persisted learned parameters when learning is disabled."""
+    configured_params = ValveCurveParams(
+        min_valve=12.0,
+        knee_demand=75.0,
+        knee_valve=24.0,
+        max_valve=95.0,
+    )
+    algo = AdaptiveTPIAlgorithm(
+        name="test-valve-config-precedence",
+        actuator_mode=ACTUATOR_MODE_VALVE,
+        valve_curve_params=configured_params,
+        valve_curve_learning_enabled=False,
+        debug_mode=True,
+    )
+
+    algo.load_state(
+        {
+            "valve_curve": {
+                "actuator_mode": ACTUATOR_MODE_VALVE,
+                "params": {
+                    "min_valve": 7.0,
+                    "knee_demand": 80.0,
+                    "knee_valve": 15.0,
+                    "max_valve": 100.0,
+                },
+                "configured_params": {
+                    "min_valve": 7.0,
+                    "knee_demand": 80.0,
+                    "knee_valve": 15.0,
+                    "max_valve": 100.0,
+                },
+                "learning_enabled": True,
+                "observations": [
+                    {
+                        "u_linear_equiv": 0.8,
+                        "u_valve": 0.2,
+                        "timestamp": "2026-04-24T12:00:00+00:00",
+                    }
+                ],
+                "observations_accepted_count": 1,
+            }
+        }
+    )
+
+    diagnostics = algo.get_diagnostics()
+    assert diagnostics["valve_curve_params"] == {
+        "min_valve": pytest.approx(12.0),
+        "knee_demand": pytest.approx(75.0),
+        "knee_valve": pytest.approx(24.0),
+        "max_valve": pytest.approx(95.0),
+    }
+    assert diagnostics["valve_curve_learning_enabled"] is False
+    assert diagnostics["valve_curve_observations_accepted"] == 0
 
 
 def test_bootstrap_stuck_exposes_explicit_freeze_reason() -> None:

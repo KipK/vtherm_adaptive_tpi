@@ -91,8 +91,12 @@ The plugin exposes learning diagnostics in the climate `specific_states`.
 The most useful fields to inspect first are:
 
 - `adaptive_phase`
+- `actuator_mode`
 - `current_cycle_percent`
 - `next_cycle_percent`
+- `valve_curve_converged`
+- `valve_curve_observations_accepted`
+- `valve_curve_last_reason`
 - `startup_sequence_active`
 - `startup_sequence_stage`
 - `startup_sequence_attempt`

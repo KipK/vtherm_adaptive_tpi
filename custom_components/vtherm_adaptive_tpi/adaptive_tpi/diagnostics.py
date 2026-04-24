@@ -95,6 +95,11 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
         "gain_outdoor": state.k_ext,
         "actuator_mode": state.actuator_mode,
         "valve_curve_params": state.valve_curve_params,
+        "valve_curve_learning_enabled": state.valve_curve_learning_enabled,
+        "valve_curve_converged": state.valve_curve_converged,
+        "valve_curve_observations_accepted": state.valve_curve_observations_accepted,
+        "valve_curve_observations_rejected": state.valve_curve_observations_rejected,
+        "valve_curve_last_reason": state.valve_curve_last_reason,
         "current_cycle_percent": state.committed_on_percent,
         "next_cycle_percent": state.requested_on_percent,
         "deadtime_cycles": state.nd_hat,
@@ -196,5 +201,11 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
             "committed_on_percent": state.committed_on_percent,
             "actuator_mode": state.actuator_mode,
             "valve_curve_params": state.valve_curve_params,
+            "valve_curve_learning_enabled": state.valve_curve_learning_enabled,
+            "valve_curve_converged": state.valve_curve_converged,
+            "valve_curve_observations_accepted": state.valve_curve_observations_accepted,
+            "valve_curve_observations_rejected": state.valve_curve_observations_rejected,
+            "valve_curve_rejected_updates": state.valve_curve_rejected_updates,
+            "valve_curve_last_reason": state.valve_curve_last_reason,
         }
     return data

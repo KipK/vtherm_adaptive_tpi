@@ -9,3 +9,14 @@ reset_learning:
       selector:
         entity:
           domain: climate
+reset_valve_curve:
+  name: Reset Adaptive TPI valve curve
+  description: Reset only the Adaptive TPI valve curve for a thermostat.
+  fields:
+    entity_id:
+      name: Target thermostat
+      description: The VTherm climate entity whose valve curve should be reset.
+      required: true
+      selector:
+        entity:
+          domain: climate

@@ -38,6 +38,13 @@ Aucune donnée `specific_states.adaptive_tpi` trouvée pour `{{ entity }}`.
 {% set stage = stage_names.get(diag.get('startup_sequence_stage'), diag.get('startup_sequence_stage') or 'Indisponible') %}
 {% set current_cycle = diag.get('current_cycle_percent') %}
 {% set next_cycle = diag.get('next_cycle_percent') %}
+{% set actuator_mode = diag.get('actuator_mode') %}
+{% set valve_curve_params = diag.get('valve_curve_params') %}
+{% set valve_curve_learning_enabled = diag.get('valve_curve_learning_enabled') %}
+{% set valve_curve_converged = diag.get('valve_curve_converged') %}
+{% set valve_curve_observations_accepted = diag.get('valve_curve_observations_accepted') %}
+{% set valve_curve_observations_rejected = diag.get('valve_curve_observations_rejected') %}
+{% set valve_curve_last_reason = diag.get('valve_curve_last_reason') %}
 {% set deadtime_minutes = diag.get('deadtime_minutes') %}
 {% set deadtime_cycles = diag.get('deadtime_cycles') %}
 {% set deadtime_confidence = diag.get('deadtime_confidence') %}
@@ -61,6 +68,12 @@ Aucune donnée `specific_states.adaptive_tpi` trouvée pour `{{ entity }}`.
 {% set last_blocker = diag.get('last_runtime_blocker') %}
 {% set current_cycle_text = ((current_cycle * 100) | round(0) ~ ' %') if current_cycle is not none else 'Indisponible' %}
 {% set next_cycle_text = ((next_cycle * 100) | round(0) ~ ' %') if next_cycle is not none else 'Indisponible' %}
+{% set calculated_cycle = debug.get('calculated_on_percent') if debug else none %}
+{% set requested_cycle = debug.get('requested_on_percent') if debug else none %}
+{% set committed_cycle = debug.get('committed_on_percent') if debug else none %}
+{% set calculated_cycle_text = ((calculated_cycle * 100) | round(0) ~ ' %') if calculated_cycle is not none else 'Indisponible' %}
+{% set requested_cycle_text = ((requested_cycle * 100) | round(0) ~ ' %') if requested_cycle is not none else 'Indisponible' %}
+{% set committed_cycle_text = ((committed_cycle * 100) | round(0) ~ ' %') if committed_cycle is not none else 'Indisponible' %}
 {% set deadtime_text = (deadtime_minutes | round(1) ~ ' min') if deadtime_minutes is not none else ((deadtime_cycles | round(2) ~ ' cycle(s)') if deadtime_cycles is not none else 'Non mesuré') %}
 {% set deadtime_conf_text = ((deadtime_confidence * 100) | round(0) ~ ' %') if deadtime_confidence is not none else 'Indisponible' %}
 {% set gain_indoor_text = (gain_indoor | round(3)) if gain_indoor is not none else 'Indisponible' %}
@@ -68,6 +81,9 @@ Aucune donnée `specific_states.adaptive_tpi` trouvée pour `{{ entity }}`.
 {% set control_rate_text = (control_rate | round(2) ~ ' °C/h') if control_rate is not none else 'En attente' %}
 {% set drift_rate_text = (drift_rate | round(3) ~ ' 1/h') if drift_rate is not none else 'En attente' %}
 {% set tau_text = (tau_h | round(2) ~ ' h') if tau_h is not none else 'En attente' %}
+{% set actuator_mode_text = actuator_mode or 'Indisponible' %}
+{% set valve_curve_status_text = 'Stable' if valve_curve_converged else ('Apprentissage actif' if valve_curve_learning_enabled else 'Figée') %}
+{% set valve_curve_reason_text = valve_curve_last_reason if valve_curve_last_reason else 'Aucune' %}
 
 ## 🧠 {{ name }}
 
@@ -98,6 +114,29 @@ Aucune donnée `specific_states.adaptive_tpi` trouvée pour `{{ entity }}`.
 | {{ icon_control }} Apprentissage contrôle | **{{ 'Autorisé' if control_enabled else 'Pas encore' }}** |
 | {{ icon_drift }} Échantillons dérive | **{{ (drift_samples if drift_samples is not none else 0) ~ ' / ' ~ sample_window_size }}** |
 | {{ icon_control }} Échantillons contrôle | **{{ (control_samples if control_samples is not none else 0) ~ ' / ' ~ sample_window_size }}** |
+
+{% if actuator_mode == 'valve' %}
+| Courbe de vanne | Valeur |
+|---|---|
+| 🧩 Mode actionneur | **{{ actuator_mode_text }}** |
+| 📈 Apprentissage courbe | **{{ valve_curve_status_text }}** |
+| ✅ Observations acceptées | **{{ valve_curve_observations_accepted if valve_curve_observations_accepted is not none else 0 }}** |
+| 🚫 Observations rejetées | **{{ valve_curve_observations_rejected if valve_curve_observations_rejected is not none else 0 }}** |
+| 📝 Dernier résultat courbe | **{{ '`' ~ valve_curve_reason_text ~ '`' }}** |
+
+| Demande vs puissance appliquée | Valeur |
+|---|---|
+| 🎯 Demande linéaire | **{{ calculated_cycle_text }}** |
+| 🛞 Commande vanne demandée | **{{ requested_cycle_text }}** |
+| ⚙️ Puissance appliquée | **{{ committed_cycle_text }}** |
+
+| Paramètres de courbe | Valeur |
+|---|---|
+| `min_valve` | **{{ valve_curve_params.get('min_valve') | round(1) }} %** |
+| `knee_demand` | **{{ valve_curve_params.get('knee_demand') | round(1) }} %** |
+| `knee_valve` | **{{ valve_curve_params.get('knee_valve') | round(1) }} %** |
+| `max_valve` | **{{ valve_curve_params.get('max_valve') | round(1) }} %** |
+{% endif %}
 
 | Dernière activité | Valeur |
 |---|---|

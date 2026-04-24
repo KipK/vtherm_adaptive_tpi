@@ -33,6 +33,25 @@ Possible values:
 
 These are the projected gains currently used by the controller.
 
+### Actuator linearization
+
+- `actuator_mode`
+- `valve_curve_params`
+- `valve_curve_learning_enabled`
+- `valve_curve_converged`
+- `valve_curve_observations_accepted`
+- `valve_curve_observations_rejected`
+- `valve_curve_last_reason`
+
+Interpretation:
+
+- `actuator_mode` identifies whether the runtime is operating in `switch` or `valve` command space
+- `valve_curve_params` exposes the current two-slope valve characteristic when valve mode is active
+- `valve_curve_learning_enabled` indicates whether online curve adaptation is allowed
+- `valve_curve_converged` indicates whether the bounded curve fit is considered stable
+- `valve_curve_observations_accepted` and `valve_curve_observations_rejected` track the online learner admission filter
+- `valve_curve_last_reason` exposes the latest curve-learning outcome or rejection reason
+
 ### Deadtime
 
 - `deadtime_cycles`
@@ -191,6 +210,14 @@ This mapping keeps the implementation-oriented names used by the algorithm.
   - `calculated_on_percent`
   - `requested_on_percent`
   - `committed_on_percent`
+  - `actuator_mode`
+  - `valve_curve_params`
+  - `valve_curve_learning_enabled`
+  - `valve_curve_converged`
+  - `valve_curve_observations_accepted`
+  - `valve_curve_observations_rejected`
+  - `valve_curve_rejected_updates`
+  - `valve_curve_last_reason`
 - cross-check:
   - `b_crosscheck_error`
   - `b_methods_consistent`

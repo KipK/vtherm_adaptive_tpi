@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 import voluptuous as vol
 from homeassistant.components.climate import DOMAIN as CLIMATE_DOMAIN
@@ -11,16 +11,25 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 
 from .const import (
+    ACTUATOR_MODE_AUTO,
     CONF_ADAPTIVE_TPI_DEBUG,
+    CONF_ACTUATOR_MODE_OVERRIDE,
     CONF_DEFAULT_KEXT,
     CONF_DEFAULT_KINT,
     CONF_MINIMAL_ACTIVATION_DELAY,
     CONF_MINIMAL_DEACTIVATION_DELAY,
     CONF_RESPONSIVENESS,
     CONF_TARGET_VTHERM,
+    CONF_VALVE_CURVE_LEARNING_ENABLED,
+    CONF_VALVE_KNEE_DEMAND,
+    CONF_VALVE_KNEE_VALVE,
+    CONF_VALVE_MAX_VALVE,
+    CONF_VALVE_MIN_VALVE,
     DEFAULT_OPTIONS,
     DOMAIN,
 )
+
+ERROR_INVALID_VALVE_CURVE = "invalid_valve_curve"
 
 
 def build_options_schema(defaults: dict[str, Any]) -> vol.Schema:
@@ -85,6 +94,67 @@ def build_options_schema(defaults: dict[str, Any]) -> vol.Schema:
                 )
             ),
             vol.Optional(
+                CONF_ACTUATOR_MODE_OVERRIDE,
+                default=defaults[CONF_ACTUATOR_MODE_OVERRIDE],
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        selector.SelectOptionDict(value=ACTUATOR_MODE_AUTO, label="Auto"),
+                        selector.SelectOptionDict(value="switch", label="Switch"),
+                        selector.SelectOptionDict(value="valve", label="Valve"),
+                    ],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Optional(
+                CONF_VALVE_CURVE_LEARNING_ENABLED,
+                default=defaults[CONF_VALVE_CURVE_LEARNING_ENABLED],
+            ): bool,
+            vol.Optional(
+                CONF_VALVE_MIN_VALVE,
+                default=defaults[CONF_VALVE_MIN_VALVE],
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0,
+                    max=20,
+                    step=1,
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Optional(
+                CONF_VALVE_KNEE_DEMAND,
+                default=defaults[CONF_VALVE_KNEE_DEMAND],
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=50,
+                    max=95,
+                    step=1,
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Optional(
+                CONF_VALVE_KNEE_VALVE,
+                default=defaults[CONF_VALVE_KNEE_VALVE],
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=10,
+                    max=50,
+                    step=1,
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Optional(
+                CONF_VALVE_MAX_VALVE,
+                default=defaults[CONF_VALVE_MAX_VALVE],
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=50,
+                    max=100,
+                    step=1,
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Optional(
                 CONF_ADAPTIVE_TPI_DEBUG,
                 default=defaults[CONF_ADAPTIVE_TPI_DEBUG],
             ): bool,
@@ -101,6 +171,29 @@ def build_user_schema(defaults: dict[str, Any]) -> vol.Schema:
     }
     schema.update(build_options_schema(defaults).schema)
     return vol.Schema(schema)
+
+
+def _schema_defaults(user_input: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Return form defaults merged with the latest submitted values."""
+    defaults = dict(DEFAULT_OPTIONS)
+    if user_input is not None:
+        defaults.update(user_input)
+    return defaults
+
+
+def _validate_valve_curve_config(config: Mapping[str, Any]) -> dict[str, str]:
+    """Validate cross-field valve curve constraints."""
+    try:
+        min_valve = float(config[CONF_VALVE_MIN_VALVE])
+        knee_demand = float(config[CONF_VALVE_KNEE_DEMAND])
+        knee_valve = float(config[CONF_VALVE_KNEE_VALVE])
+        max_valve = float(config[CONF_VALVE_MAX_VALVE])
+    except (KeyError, TypeError, ValueError):
+        return {"base": ERROR_INVALID_VALVE_CURVE}
+
+    if 0.0 <= min_valve < knee_valve < max_valve <= 100.0 and 0.0 < knee_demand < 100.0:
+        return {}
+    return {"base": ERROR_INVALID_VALVE_CURVE}
 
 
 class AdaptiveTPIConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -126,6 +219,13 @@ class AdaptiveTPIConfigFlow(ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
 
         if user_input is not None:
+            errors = _validate_valve_curve_config(_schema_defaults(user_input))
+            if errors:
+                return self.async_show_form(
+                    step_id="global",
+                    data_schema=build_options_schema(_schema_defaults(user_input)),
+                    errors=errors,
+                )
             return self.async_create_entry(title="Adaptive TPI defaults", data=user_input)
 
         return self.async_show_form(
@@ -144,6 +244,14 @@ class AdaptiveTPIConfigFlow(ConfigFlow, domain=DOMAIN):
                     step_id="thermostat",
                     data_schema=build_user_schema(DEFAULT_OPTIONS),
                     errors={CONF_TARGET_VTHERM: "invalid_entity"},
+                )
+
+            errors = _validate_valve_curve_config(_schema_defaults(user_input))
+            if errors:
+                return self.async_show_form(
+                    step_id="thermostat",
+                    data_schema=build_user_schema(_schema_defaults(user_input)),
+                    errors=errors,
                 )
 
             target_unique_id = reg_entry.unique_id
@@ -176,11 +284,21 @@ class AdaptiveTPIOptionsFlow(OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         """Handle the options flow."""
-        if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
-
         defaults = dict(DEFAULT_OPTIONS)
         defaults.update(self._config_entry.options or self._config_entry.data)
+
+        if user_input is not None:
+            submitted_defaults = dict(defaults)
+            submitted_defaults.update(user_input)
+            errors = _validate_valve_curve_config(submitted_defaults)
+            if errors:
+                return self.async_show_form(
+                    step_id="init",
+                    data_schema=build_options_schema(submitted_defaults),
+                    errors=errors,
+                )
+            return self.async_create_entry(title="", data=user_input)
+
         return self.async_show_form(
             step_id="init",
             data_schema=build_options_schema(defaults),

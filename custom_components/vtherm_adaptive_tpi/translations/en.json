@@ -10,12 +10,24 @@
           "responsiveness": "Responsiveness",
           "default_kint": "Initial Kint (indoor gain)",
           "default_kext": "Initial Kext (outdoor gain)",
+          "actuator_mode_override": "Actuator mode override",
+          "valve_curve_learning_enabled": "Enable valve curve learning",
+          "valve_min_valve": "Valve minimum opening",
+          "valve_knee_demand": "Valve knee demand",
+          "valve_knee_valve": "Valve knee opening",
+          "valve_max_valve": "Valve maximum opening",
           "adaptive_tpi_debug": "Debug mode"
         },
         "data_description": {
           "responsiveness": "Controls setpoint tracking speed. 1 = aggressive (fast rise, higher overshoot risk), 5 = conservative (slow rise, robust). Default: 3.",
           "default_kint": "Starting value for the proportional indoor gain. The algorithm will adapt it over time.",
-          "default_kext": "Starting value for the outdoor feedforward gain. The algorithm will adapt it over time."
+          "default_kext": "Starting value for the outdoor feedforward gain. The algorithm will adapt it over time.",
+          "actuator_mode_override": "Leave empty to follow VTherm metadata. Use this only to force switch or valve behavior.",
+          "valve_curve_learning_enabled": "When disabled, the valve curve keeps the configured manual parameters.",
+          "valve_min_valve": "Smallest valve opening considered effective by the curve.",
+          "valve_knee_demand": "Linear demand at which the valve curve changes slope.",
+          "valve_knee_valve": "Valve opening reached at the curve knee.",
+          "valve_max_valve": "Upper valve opening used by the curve."
         }
       },
       "thermostat": {
@@ -27,20 +39,38 @@
           "responsiveness": "Responsiveness",
           "default_kint": "Initial Kint (indoor gain)",
           "default_kext": "Initial Kext (outdoor gain)",
+          "actuator_mode_override": "Actuator mode override",
+          "valve_curve_learning_enabled": "Enable valve curve learning",
+          "valve_min_valve": "Valve minimum opening",
+          "valve_knee_demand": "Valve knee demand",
+          "valve_knee_valve": "Valve knee opening",
+          "valve_max_valve": "Valve maximum opening",
           "adaptive_tpi_debug": "Debug mode"
         },
         "data_description": {
           "responsiveness": "Controls setpoint tracking speed. 1 = aggressive (fast rise, higher overshoot risk), 5 = conservative (slow rise, robust). Default: 3.",
           "default_kint": "Starting value for the proportional indoor gain. The algorithm will adapt it over time.",
-          "default_kext": "Starting value for the outdoor feedforward gain. The algorithm will adapt it over time."
+          "default_kext": "Starting value for the outdoor feedforward gain. The algorithm will adapt it over time.",
+          "actuator_mode_override": "Leave empty to follow VTherm metadata. Use this only to force switch or valve behavior.",
+          "valve_curve_learning_enabled": "When disabled, the valve curve keeps the configured manual parameters.",
+          "valve_min_valve": "Smallest valve opening considered effective by the curve.",
+          "valve_knee_demand": "Linear demand at which the valve curve changes slope.",
+          "valve_knee_valve": "Valve opening reached at the curve knee.",
+          "valve_max_valve": "Upper valve opening used by the curve."
         }
       }
+    },
+    "error": {
+      "invalid_valve_curve": "The valve curve must satisfy minimum opening < knee opening < maximum opening."
     },
     "abort": {
       "already_configured": "This Adaptive TPI entry is already configured."
     }
   },
   "options": {
+    "error": {
+      "invalid_valve_curve": "The valve curve must satisfy minimum opening < knee opening < maximum opening."
+    },
     "step": {
       "init": {
         "title": "Adaptive TPI defaults",
@@ -50,12 +80,24 @@
           "responsiveness": "Responsiveness",
           "default_kint": "Initial Kint (indoor gain)",
           "default_kext": "Initial Kext (outdoor gain)",
+          "actuator_mode_override": "Actuator mode override",
+          "valve_curve_learning_enabled": "Enable valve curve learning",
+          "valve_min_valve": "Valve minimum opening",
+          "valve_knee_demand": "Valve knee demand",
+          "valve_knee_valve": "Valve knee opening",
+          "valve_max_valve": "Valve maximum opening",
           "adaptive_tpi_debug": "Debug mode"
         },
         "data_description": {
           "responsiveness": "Controls setpoint tracking speed. 1 = aggressive (fast rise, higher overshoot risk), 5 = conservative (slow rise, robust). Default: 3.",
           "default_kint": "Starting value for the proportional indoor gain. The algorithm will adapt it over time.",
-          "default_kext": "Starting value for the outdoor feedforward gain. The algorithm will adapt it over time."
+          "default_kext": "Starting value for the outdoor feedforward gain. The algorithm will adapt it over time.",
+          "actuator_mode_override": "Leave empty to follow VTherm metadata. Use this only to force switch or valve behavior.",
+          "valve_curve_learning_enabled": "When disabled, the valve curve keeps the configured manual parameters.",
+          "valve_min_valve": "Smallest valve opening considered effective by the curve.",
+          "valve_knee_demand": "Linear demand at which the valve curve changes slope.",
+          "valve_knee_valve": "Valve opening reached at the curve knee.",
+          "valve_max_valve": "Upper valve opening used by the curve."
         }
       }
     }

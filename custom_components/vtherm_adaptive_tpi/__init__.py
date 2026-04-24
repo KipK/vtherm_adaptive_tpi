@@ -20,6 +20,7 @@ from .const import (
     DOMAIN,
     PROP_FUNCTION_ADAPTIVE_TPI,
     SERVICE_RESET_LEARNING,
+    SERVICE_RESET_VALVE_CURVE,
 )
 from .factory import AdaptiveTPIHandlerFactory
 
@@ -173,10 +174,19 @@ def _register_services(hass: HomeAssistant) -> None:
         """Handle the Adaptive TPI reset service with a real async callable."""
         await _call_on_vtherms(call, "service_reset_learning")
 
+    async def _handle_reset_valve_curve(call) -> None:
+        """Handle the Adaptive TPI valve curve reset service."""
+        await _call_on_vtherms(call, "service_reset_valve_curve")
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_RESET_LEARNING,
         _handle_reset_learning,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RESET_VALVE_CURVE,
+        _handle_reset_valve_curve,
     )
     data[DATA_SERVICES_REGISTERED] = True
 
@@ -184,6 +194,7 @@ def _register_services(hass: HomeAssistant) -> None:
 def _unregister_services(hass: HomeAssistant) -> None:
     """Unregister Adaptive TPI services from the plugin domain."""
     hass.services.async_remove(DOMAIN, SERVICE_RESET_LEARNING)
+    hass.services.async_remove(DOMAIN, SERVICE_RESET_VALVE_CURVE)
     _ensure_domain_data(hass)[DATA_SERVICES_REGISTERED] = False
 
 

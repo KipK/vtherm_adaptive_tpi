@@ -13,12 +13,15 @@ from homeassistant.helpers.storage import Store
 
 from .algo import AdaptiveTPIAlgorithm
 from .adaptive_tpi.state import PERSISTENCE_SCHEMA_VERSION
+from .adaptive_tpi.valve_curve import ValveCurveParams
 from .const import (
+    ACTUATOR_MODE_AUTO,
     ACTUATOR_MODE_SWITCH,
     ACTUATOR_MODE_VALVE,
     AUTO_REGULATION_VALVE,
     CONF_ADAPTIVE_TPI_DEBUG,
     CONF_AUTO_REGULATION_MODE_KEY,
+    CONF_ACTUATOR_MODE_OVERRIDE,
     CONF_DEFAULT_KEXT,
     CONF_DEFAULT_KINT,
     CONF_MINIMAL_ACTIVATION_DELAY,
@@ -26,6 +29,11 @@ from .const import (
     CONF_RESPONSIVENESS,
     CONF_TARGET_VTHERM,
     CONF_THERMOSTAT_TYPE_KEY,
+    CONF_VALVE_CURVE_LEARNING_ENABLED,
+    CONF_VALVE_KNEE_DEMAND,
+    CONF_VALVE_KNEE_VALVE,
+    CONF_VALVE_MAX_VALVE,
+    CONF_VALVE_MIN_VALVE,
     DEFAULT_KEXT,
     DEFAULT_KINT,
     DEFAULT_OPTIONS,
@@ -75,6 +83,16 @@ def _resolve_actuator_mode(entry_infos: dict | None) -> str:
     return ACTUATOR_MODE_SWITCH
 
 
+def _resolve_effective_actuator_mode(config: dict, entry_infos: dict | None) -> str:
+    """Resolve the actuator mode with an optional explicit override."""
+    override = config.get(CONF_ACTUATOR_MODE_OVERRIDE)
+    if override in (ACTUATOR_MODE_SWITCH, ACTUATOR_MODE_VALVE):
+        return override
+    if override in (None, ACTUATOR_MODE_AUTO):
+        return _resolve_actuator_mode(entry_infos)
+    return _resolve_actuator_mode(entry_infos)
+
+
 class AdaptiveTPIHandler:
     """Handler for Adaptive TPI-specific runtime logic."""
 
@@ -96,6 +114,7 @@ class AdaptiveTPIHandler:
         """Initialize Adaptive TPI algorithm."""
         t = self._thermostat
         entry = self._get_effective_config()
+        actuator_mode = _resolve_effective_actuator_mode(entry, t.entry_infos or {})
 
         t.minimal_activation_delay = entry.get(CONF_MINIMAL_ACTIVATION_DELAY, 0)
         t.minimal_deactivation_delay = entry.get(CONF_MINIMAL_DEACTIVATION_DELAY, 0)
@@ -107,7 +126,23 @@ class AdaptiveTPIHandler:
             responsiveness=int(entry.get(CONF_RESPONSIVENESS, DEFAULT_RESPONSIVENESS)),
             default_kint=float(entry.get(CONF_DEFAULT_KINT, DEFAULT_KINT)),
             default_kext=float(entry.get(CONF_DEFAULT_KEXT, DEFAULT_KEXT)),
-            actuator_mode=_resolve_actuator_mode(t.entry_infos or {}),
+            actuator_mode=actuator_mode,
+            valve_curve_params=ValveCurveParams(
+                min_valve=float(entry.get(CONF_VALVE_MIN_VALVE, DEFAULT_OPTIONS[CONF_VALVE_MIN_VALVE])),
+                knee_demand=float(
+                    entry.get(CONF_VALVE_KNEE_DEMAND, DEFAULT_OPTIONS[CONF_VALVE_KNEE_DEMAND])
+                ),
+                knee_valve=float(
+                    entry.get(CONF_VALVE_KNEE_VALVE, DEFAULT_OPTIONS[CONF_VALVE_KNEE_VALVE])
+                ),
+                max_valve=float(entry.get(CONF_VALVE_MAX_VALVE, DEFAULT_OPTIONS[CONF_VALVE_MAX_VALVE])),
+            ),
+            valve_curve_learning_enabled=bool(
+                entry.get(
+                    CONF_VALVE_CURVE_LEARNING_ENABLED,
+                    DEFAULT_OPTIONS[CONF_VALVE_CURVE_LEARNING_ENABLED],
+                )
+            ),
         )
         self._refresh_published_diagnostics()
 
@@ -474,6 +509,22 @@ class AdaptiveTPIHandler:
         self.update_attributes()
         t.async_write_ha_state()
         _LOGGER.info("%s - Adaptive TPI learning state has been reset", t)
+
+    async def service_reset_valve_curve(self) -> None:
+        """Reset only the valve curve and persist the remaining adaptive state."""
+        t = self._thermostat
+        if t.prop_algorithm is None or not hasattr(t.prop_algorithm, "reset_valve_curve"):
+            _LOGGER.warning("%s - Adaptive TPI reset_valve_curve ignored: no active algorithm", t)
+            return
+
+        t.prop_algorithm.reset_valve_curve()
+        await self._async_save_persisted_state()
+        self._refresh_published_diagnostics()
+        t.recalculate(force=True)
+        await t.async_control_heating(force=True)
+        self.update_attributes()
+        t.async_write_ha_state()
+        _LOGGER.info("%s - Adaptive TPI valve curve has been reset", t)
 
     def _refresh_published_diagnostics(self) -> None:
         """Snapshot diagnostics that stay stable until the next cycle boundary."""

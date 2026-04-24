@@ -11,13 +11,21 @@
           "responsiveness": "Responsiveness (1=aggressive … 5=conservative)",
           "default_kint": "Initial Kint (indoor gain)",
           "default_kext": "Initial Kext (outdoor gain)",
+          "actuator_mode_override": "Actuator mode override",
+          "valve_curve_learning_enabled": "Enable valve curve learning",
+          "valve_min_valve": "Valve minimum opening",
+          "valve_knee_demand": "Valve knee demand",
+          "valve_knee_valve": "Valve knee opening",
+          "valve_max_valve": "Valve maximum opening",
           "adaptive_tpi_debug": "Enable debug mode"
         }
       }
+    },
+    "error": {
+      "invalid_valve_curve": "The valve curve must satisfy minimum opening < knee opening < maximum opening."
     },
     "abort": {
       "already_configured": "This Adaptive TPI entry is already configured."
     }
   }
 }
-

@@ -32,6 +32,25 @@ Valeurs possibles :
 
 Ce sont les gains projetés actuellement utilisés par le contrôleur.
 
+### Linéarisation de l'actionneur
+
+- `actuator_mode`
+- `valve_curve_params`
+- `valve_curve_learning_enabled`
+- `valve_curve_converged`
+- `valve_curve_observations_accepted`
+- `valve_curve_observations_rejected`
+- `valve_curve_last_reason`
+
+Interprétation :
+
+- `actuator_mode` indique si l'exécution utilise l'espace de commande `switch` ou `valve`
+- `valve_curve_params` expose la caractéristique de vanne à deux pentes quand le mode valve est actif
+- `valve_curve_learning_enabled` indique si l'adaptation en ligne de la courbe est autorisée
+- `valve_curve_converged` indique si l'ajustement borné de la courbe est jugé stable
+- `valve_curve_observations_accepted` et `valve_curve_observations_rejected` suivent le filtre d'admission de l'apprenant
+- `valve_curve_last_reason` expose le dernier résultat ou motif de rejet de l'apprentissage de courbe
+
 ### Temps mort
 
 - `deadtime_cycles`
@@ -189,6 +208,14 @@ Ce mappage conserve les noms orientés implémentation utilisés par l'algorithm
   - `calculated_on_percent`
   - `requested_on_percent`
   - `committed_on_percent`
+  - `actuator_mode`
+  - `valve_curve_params`
+  - `valve_curve_learning_enabled`
+  - `valve_curve_converged`
+  - `valve_curve_observations_accepted`
+  - `valve_curve_observations_rejected`
+  - `valve_curve_rejected_updates`
+  - `valve_curve_last_reason`
 - vérification croisée :
   - `b_crosscheck_error`
   - `b_methods_consistent`

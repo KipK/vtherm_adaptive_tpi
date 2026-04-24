@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from dataclasses import asdict
 from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
@@ -28,7 +29,7 @@ from .adaptive_tpi.startup_bootstrap import (
 from .adaptive_tpi.mode import hvac_mode_sign
 from .adaptive_tpi.state import AdaptiveTPIState
 from .adaptive_tpi.supervisor import AdaptiveTPISupervisor, PHASE_A, PHASE_B
-from .adaptive_tpi.valve_curve import build_valve_curve
+from .adaptive_tpi.valve_curve import ValveCurveParams, build_valve_curve
 from .const import (
     ACTUATOR_MODE_VALVE,
     ACTUATOR_MODE_SWITCH,
@@ -78,6 +79,8 @@ class AdaptiveTPIAlgorithm:
         default_kint: float = DEFAULT_KINT,
         default_kext: float = DEFAULT_KEXT,
         actuator_mode: str = ACTUATOR_MODE_SWITCH,
+        valve_curve_params: ValveCurveParams | None = None,
+        valve_curve_learning_enabled: bool = True,
     ) -> None:
         """Initialize the algorithm scaffold."""
         self._name = name
@@ -88,7 +91,13 @@ class AdaptiveTPIAlgorithm:
         self._default_kint = default_kint
         self._default_kext = default_kext
         self._actuator_mode = actuator_mode
-        self._valve_curve = build_valve_curve(actuator_mode)
+        self._configured_valve_curve_params = valve_curve_params
+        self._valve_curve_learning_enabled = valve_curve_learning_enabled
+        self._valve_curve = build_valve_curve(
+            actuator_mode,
+            params=valve_curve_params,
+            learning_enabled=valve_curve_learning_enabled,
+        )
         self._state = AdaptiveTPIState(
             k_int=default_kint,
             k_ext=default_kext,
@@ -368,6 +377,8 @@ class AdaptiveTPIAlgorithm:
         estimator_updated = False
         estimator_update = None
         current_cycle_regime = self._state.current_cycle_regime
+        a_hat_for_valve_curve = self._state.a_hat
+        on_window = None
 
         observations = self._learning_observations_with_terminal(
             target_temp=target_temp,
@@ -456,6 +467,27 @@ class AdaptiveTPIAlgorithm:
         else:
             self._supervisor.finalize_non_informative_cycle(self._state.last_learning_attempt_reason)
         self._refresh_b_crosscheck()
+        if (
+            self._actuator_mode == ACTUATOR_MODE_VALVE
+            and current_cycle_regime == WINDOW_REGIME_ON
+            and on_window is not None
+            and on_window.sample is not None
+        ):
+            self._valve_curve.observe(
+                u_valve=completed_cycle.applied_power,
+                dTdt=on_window.sample.dTdt,
+                delta_out=on_window.sample.delta_out,
+                a_hat=a_hat_for_valve_curve,
+                b_hat=self._state.b_hat,
+                b_converged=self._state.b_converged,
+                mode_sign=pending_mode_sign,
+                timestamp=(
+                    measure_timestamp.isoformat()
+                    if isinstance(measure_timestamp, datetime)
+                    else self._utc_now().isoformat()
+                ),
+            )
+            self._refresh_valve_curve_state()
         self._supervisor.update_phase_progression(
             self._state,
             deadtime_costs_available=bool(deadtime_result.candidate_costs),
@@ -489,7 +521,11 @@ class AdaptiveTPIAlgorithm:
             k_int=self._default_kint,
             k_ext=self._default_kext,
         )
-        self._valve_curve = build_valve_curve(self._actuator_mode)
+        self._valve_curve = build_valve_curve(
+            self._actuator_mode,
+            params=self._configured_valve_curve_params,
+            learning_enabled=self._valve_curve_learning_enabled,
+        )
         self._refresh_valve_curve_state()
         self._supervisor.reset()
         self._deadtime_model.reset()
@@ -503,6 +539,15 @@ class AdaptiveTPIAlgorithm:
         self._temperature_available = False
         self._pending_cycle_sample = None
         self._startup_bootstrap.reset()
+
+    def reset_valve_curve(self) -> None:
+        """Reset only the valve curve while keeping the learned 1R1C state."""
+        self._valve_curve = build_valve_curve(
+            self._actuator_mode,
+            params=self._configured_valve_curve_params,
+            learning_enabled=self._valve_curve_learning_enabled,
+        )
+        self._refresh_valve_curve_state()
 
     def persistence_metadata(self, *, cycle_min: float) -> dict[str, Any]:
         """Return the persistence metadata required for safe warm starts."""
@@ -563,6 +608,8 @@ class AdaptiveTPIAlgorithm:
                 persisted_curve = data.get("valve_curve")
                 if isinstance(persisted_curve, Mapping) and persisted_curve.get("actuator_mode"):
                     self._supervisor.last_freeze_reason = "actuator_mode_changed"
+            self._valve_curve.set_learning_enabled(self._valve_curve_learning_enabled)
+            self._apply_configured_valve_curve_policy(data.get("valve_curve"))
             if should_restore_deadtime:
                 deadtime_result = self._deadtime_model.last_result
                 self._state.nd_hat = deadtime_result.nd_hat
@@ -883,6 +930,43 @@ class AdaptiveTPIAlgorithm:
                 "max_valve": params.max_valve,
             }
         )
+        self._state.valve_curve_learning_enabled = self._valve_curve.learning_enabled
+        self._state.valve_curve_converged = self._valve_curve.is_converged
+        self._state.valve_curve_observations_accepted = (
+            self._valve_curve.observations_accepted_count
+        )
+        self._state.valve_curve_observations_rejected = (
+            self._valve_curve.observations_rejected_count
+        )
+        self._state.valve_curve_rejected_updates = self._valve_curve.rejected_updates
+        self._state.valve_curve_last_reason = self._valve_curve.last_reason
+
+    def _apply_configured_valve_curve_policy(
+        self,
+        persisted_curve: Mapping[str, Any] | None,
+    ) -> None:
+        """Keep configured manual valve parameters authoritative when required."""
+        if (
+            self._actuator_mode != ACTUATOR_MODE_VALVE
+            or self._configured_valve_curve_params is None
+        ):
+            return
+        configured_params = self._configured_valve_curve_params
+        current_config = asdict(configured_params)
+        persisted_config = (
+            persisted_curve.get("configured_params")
+            if isinstance(persisted_curve, Mapping)
+            else None
+        )
+        config_matches_persisted = (
+            isinstance(persisted_config, Mapping)
+            and persisted_config == current_config
+        )
+        if not self._valve_curve_learning_enabled or not config_matches_persisted:
+            self._valve_curve.set_params(configured_params)
+            self._valve_curve.reset_learning()
+        if hasattr(self._valve_curve, "set_configured_params"):
+            self._valve_curve.set_configured_params(configured_params)
 
     def _refresh_projected_gains(self) -> None:
         """Update controller gains only on learning boundaries, not sensor refreshes."""

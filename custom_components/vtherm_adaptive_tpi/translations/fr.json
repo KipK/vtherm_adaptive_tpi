@@ -10,12 +10,24 @@
           "responsiveness": "Réactivité",
           "default_kint": "Kint initial (gain intérieur)",
           "default_kext": "Kext initial (gain extérieur)",
+          "actuator_mode_override": "Forçage du mode actionneur",
+          "valve_curve_learning_enabled": "Activer l'apprentissage de courbe de vanne",
+          "valve_min_valve": "Ouverture minimale de vanne",
+          "valve_knee_demand": "Demande au coude de vanne",
+          "valve_knee_valve": "Ouverture au coude de vanne",
+          "valve_max_valve": "Ouverture maximale de vanne",
           "adaptive_tpi_debug": "Mode debug"
         },
         "data_description": {
           "responsiveness": "Vitesse de suivi de consigne. 1 = agressif (montée rapide, risque de dépassement), 5 = conservateur (montée lente, robuste). Défaut : 3.",
           "default_kint": "Valeur de départ du gain proportionnel intérieur. L'algorithme l'adaptera au fil du temps.",
-          "default_kext": "Valeur de départ du gain feedforward extérieur. L'algorithme l'adaptera au fil du temps."
+          "default_kext": "Valeur de départ du gain feedforward extérieur. L'algorithme l'adaptera au fil du temps.",
+          "actuator_mode_override": "Laisser vide pour suivre les métadonnées VTherm. Utiliser ce champ seulement pour forcer switch ou valve.",
+          "valve_curve_learning_enabled": "Quand cette option est désactivée, la courbe de vanne conserve les paramètres manuels configurés.",
+          "valve_min_valve": "Plus petite ouverture de vanne considérée comme efficace par la courbe.",
+          "valve_knee_demand": "Demande linéaire à laquelle la courbe de vanne change de pente.",
+          "valve_knee_valve": "Ouverture de vanne atteinte au niveau du coude.",
+          "valve_max_valve": "Ouverture supérieure utilisée par la courbe."
         }
       },
       "thermostat": {
@@ -27,20 +39,38 @@
           "responsiveness": "Réactivité",
           "default_kint": "Kint initial (gain intérieur)",
           "default_kext": "Kext initial (gain extérieur)",
+          "actuator_mode_override": "Forçage du mode actionneur",
+          "valve_curve_learning_enabled": "Activer l'apprentissage de courbe de vanne",
+          "valve_min_valve": "Ouverture minimale de vanne",
+          "valve_knee_demand": "Demande au coude de vanne",
+          "valve_knee_valve": "Ouverture au coude de vanne",
+          "valve_max_valve": "Ouverture maximale de vanne",
           "adaptive_tpi_debug": "Mode debug"
         },
         "data_description": {
           "responsiveness": "Vitesse de suivi de consigne. 1 = agressif (montée rapide, risque de dépassement), 5 = conservateur (montée lente, robuste). Défaut : 3.",
           "default_kint": "Valeur de départ du gain proportionnel intérieur. L'algorithme l'adaptera au fil du temps.",
-          "default_kext": "Valeur de départ du gain feedforward extérieur. L'algorithme l'adaptera au fil du temps."
+          "default_kext": "Valeur de départ du gain feedforward extérieur. L'algorithme l'adaptera au fil du temps.",
+          "actuator_mode_override": "Laisser vide pour suivre les métadonnées VTherm. Utiliser ce champ seulement pour forcer switch ou valve.",
+          "valve_curve_learning_enabled": "Quand cette option est désactivée, la courbe de vanne conserve les paramètres manuels configurés.",
+          "valve_min_valve": "Plus petite ouverture de vanne considérée comme efficace par la courbe.",
+          "valve_knee_demand": "Demande linéaire à laquelle la courbe de vanne change de pente.",
+          "valve_knee_valve": "Ouverture de vanne atteinte au niveau du coude.",
+          "valve_max_valve": "Ouverture supérieure utilisée par la courbe."
         }
       }
+    },
+    "error": {
+      "invalid_valve_curve": "La courbe de vanne doit respecter ouverture minimale < ouverture au coude < ouverture maximale."
     },
     "abort": {
       "already_configured": "Cette entrée Adaptive TPI est déjà configurée."
     }
   },
   "options": {
+    "error": {
+      "invalid_valve_curve": "La courbe de vanne doit respecter ouverture minimale < ouverture au coude < ouverture maximale."
+    },
     "step": {
       "init": {
         "title": "Paramètres Adaptive TPI",
@@ -50,12 +80,24 @@
           "responsiveness": "Réactivité",
           "default_kint": "Kint initial (gain intérieur)",
           "default_kext": "Kext initial (gain extérieur)",
+          "actuator_mode_override": "Forçage du mode actionneur",
+          "valve_curve_learning_enabled": "Activer l'apprentissage de courbe de vanne",
+          "valve_min_valve": "Ouverture minimale de vanne",
+          "valve_knee_demand": "Demande au coude de vanne",
+          "valve_knee_valve": "Ouverture au coude de vanne",
+          "valve_max_valve": "Ouverture maximale de vanne",
           "adaptive_tpi_debug": "Mode debug"
         },
         "data_description": {
           "responsiveness": "Vitesse de suivi de consigne. 1 = agressif (montée rapide, risque de dépassement), 5 = conservateur (montée lente, robuste). Défaut : 3.",
           "default_kint": "Valeur de départ du gain proportionnel intérieur. L'algorithme l'adaptera au fil du temps.",
-          "default_kext": "Valeur de départ du gain feedforward extérieur. L'algorithme l'adaptera au fil du temps."
+          "default_kext": "Valeur de départ du gain feedforward extérieur. L'algorithme l'adaptera au fil du temps.",
+          "actuator_mode_override": "Laisser vide pour suivre les métadonnées VTherm. Utiliser ce champ seulement pour forcer switch ou valve.",
+          "valve_curve_learning_enabled": "Quand cette option est désactivée, la courbe de vanne conserve les paramètres manuels configurés.",
+          "valve_min_valve": "Plus petite ouverture de vanne considérée comme efficace par la courbe.",
+          "valve_knee_demand": "Demande linéaire à laquelle la courbe de vanne change de pente.",
+          "valve_knee_valve": "Ouverture de vanne atteinte au niveau du coude.",
+          "valve_max_valve": "Ouverture supérieure utilisée par la courbe."
         }
       }
     }
