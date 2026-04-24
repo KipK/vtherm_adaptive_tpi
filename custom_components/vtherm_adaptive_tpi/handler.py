@@ -536,6 +536,11 @@ class AdaptiveTPIHandler:
 
     async def _async_delete_persisted_state(self) -> None:
         """Delete the persisted snapshot file for this thermostat, if present."""
+        async_remove = getattr(self._store, "async_remove", None)
+        if async_remove is not None:
+            await async_remove()
+            return
+
         storage_path = Path(self._thermostat.hass.config.path(".storage", self._storage_key))
         try:
             storage_path.unlink(missing_ok=True)

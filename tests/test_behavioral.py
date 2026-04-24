@@ -1192,6 +1192,18 @@ async def test_service_reset_learning_recalculates_before_forced_control() -> No
 
 
 @pytest.mark.asyncio
+async def test_delete_persisted_state_uses_store_api_when_available() -> None:
+    """Learning reset should clear Home Assistant storage through the Store API."""
+    store = SimpleNamespace(async_remove=AsyncMock())
+    handler = object.__new__(AdaptiveTPIHandler)
+    handler._store = store
+
+    await handler._async_delete_persisted_state()
+
+    store.async_remove.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
 async def test_service_reset_valve_curve_recalculates_before_forced_control() -> None:
     """Valve curve reset should realign thermostat-side state before forcing cycle control."""
     thermostat = SimpleNamespace(
