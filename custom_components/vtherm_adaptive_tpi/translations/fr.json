@@ -10,21 +10,26 @@
           "responsiveness": "Réactivité",
           "default_kint": "Kint initial (gain intérieur)",
           "default_kext": "Kext initial (gain extérieur)",
-          "actuator_mode_override": "Forçage du mode actionneur",
           "valve_curve_compensation_enabled": "Activer la compensation de courbe de vanne",
-          "valve_curve_learning_enabled": "Activer l'apprentissage de courbe de vanne",
-          "valve_min_valve": "Ouverture minimale de vanne",
-          "valve_knee_demand": "Demande au coude de vanne",
-          "valve_knee_valve": "Ouverture au coude de vanne",
-          "valve_max_valve": "Ouverture maximale de vanne",
           "adaptive_tpi_debug": "Mode debug"
         },
         "data_description": {
           "responsiveness": "Vitesse de suivi de consigne. 1 = agressif (montée rapide, risque de dépassement), 5 = conservateur (montée lente, robuste). Défaut : 3.",
           "default_kint": "Valeur de départ du gain proportionnel intérieur. L'algorithme l'adaptera au fil du temps.",
           "default_kext": "Valeur de départ du gain feedforward extérieur. L'algorithme l'adaptera au fil du temps.",
-          "actuator_mode_override": "Laisser vide pour suivre les métadonnées VTherm. Utiliser ce champ seulement pour forcer switch ou valve.",
-          "valve_curve_compensation_enabled": "Quand cette option est désactivée, l'ouverture de vanne est transmise directement sans compensation non linéaire.",
+          "valve_curve_compensation_enabled": "Quand cette option est désactivée, l'ouverture de vanne est transmise directement sans compensation non linéaire."
+        }
+      },
+      "global_valve_curve": {
+        "title": "Courbe de vanne Adaptive TPI",
+        "data": {
+          "valve_curve_learning_enabled": "Activer l'apprentissage de courbe de vanne",
+          "valve_min_valve": "Ouverture minimale de vanne",
+          "valve_knee_demand": "Demande au coude de vanne",
+          "valve_knee_valve": "Ouverture au coude de vanne",
+          "valve_max_valve": "Ouverture maximale de vanne"
+        },
+        "data_description": {
           "valve_curve_learning_enabled": "Quand cette option est désactivée, la courbe de vanne conserve les paramètres manuels configurés.",
           "valve_min_valve": "Plus petite ouverture de vanne considérée comme efficace par la courbe.",
           "valve_knee_demand": "Demande linéaire à laquelle la courbe de vanne change de pente.",
@@ -35,27 +40,37 @@
       "thermostat": {
         "title": "Adaptive TPI par thermostat",
         "data": {
-          "target_vtherm_unique_id": "Thermostat cible",
+          "target_vtherm_unique_id": "Thermostat cible"
+        }
+      },
+      "thermostat_settings": {
+        "title": "Adaptive TPI par thermostat",
+        "data": {
           "minimal_activation_delay": "Délai minimal d'activation",
           "minimal_deactivation_delay": "Délai minimal de désactivation",
           "responsiveness": "Réactivité",
           "default_kint": "Kint initial (gain intérieur)",
           "default_kext": "Kext initial (gain extérieur)",
-          "actuator_mode_override": "Forçage du mode actionneur",
           "valve_curve_compensation_enabled": "Activer la compensation de courbe de vanne",
-          "valve_curve_learning_enabled": "Activer l'apprentissage de courbe de vanne",
-          "valve_min_valve": "Ouverture minimale de vanne",
-          "valve_knee_demand": "Demande au coude de vanne",
-          "valve_knee_valve": "Ouverture au coude de vanne",
-          "valve_max_valve": "Ouverture maximale de vanne",
           "adaptive_tpi_debug": "Mode debug"
         },
         "data_description": {
           "responsiveness": "Vitesse de suivi de consigne. 1 = agressif (montée rapide, risque de dépassement), 5 = conservateur (montée lente, robuste). Défaut : 3.",
           "default_kint": "Valeur de départ du gain proportionnel intérieur. L'algorithme l'adaptera au fil du temps.",
           "default_kext": "Valeur de départ du gain feedforward extérieur. L'algorithme l'adaptera au fil du temps.",
-          "actuator_mode_override": "Laisser vide pour suivre les métadonnées VTherm. Utiliser ce champ seulement pour forcer switch ou valve.",
-          "valve_curve_compensation_enabled": "Quand cette option est désactivée, l'ouverture de vanne est transmise directement sans compensation non linéaire.",
+          "valve_curve_compensation_enabled": "Quand cette option est désactivée, l'ouverture de vanne est transmise directement sans compensation non linéaire."
+        }
+      },
+      "thermostat_valve_curve": {
+        "title": "Courbe de vanne Adaptive TPI",
+        "data": {
+          "valve_curve_learning_enabled": "Activer l'apprentissage de courbe de vanne",
+          "valve_min_valve": "Ouverture minimale de vanne",
+          "valve_knee_demand": "Demande au coude de vanne",
+          "valve_knee_valve": "Ouverture au coude de vanne",
+          "valve_max_valve": "Ouverture maximale de vanne"
+        },
+        "data_description": {
           "valve_curve_learning_enabled": "Quand cette option est désactivée, la courbe de vanne conserve les paramètres manuels configurés.",
           "valve_min_valve": "Plus petite ouverture de vanne considérée comme efficace par la courbe.",
           "valve_knee_demand": "Demande linéaire à laquelle la courbe de vanne change de pente.",
@@ -84,21 +99,26 @@
           "responsiveness": "Réactivité",
           "default_kint": "Kint initial (gain intérieur)",
           "default_kext": "Kext initial (gain extérieur)",
-          "actuator_mode_override": "Forçage du mode actionneur",
           "valve_curve_compensation_enabled": "Activer la compensation de courbe de vanne",
-          "valve_curve_learning_enabled": "Activer l'apprentissage de courbe de vanne",
-          "valve_min_valve": "Ouverture minimale de vanne",
-          "valve_knee_demand": "Demande au coude de vanne",
-          "valve_knee_valve": "Ouverture au coude de vanne",
-          "valve_max_valve": "Ouverture maximale de vanne",
           "adaptive_tpi_debug": "Mode debug"
         },
         "data_description": {
           "responsiveness": "Vitesse de suivi de consigne. 1 = agressif (montée rapide, risque de dépassement), 5 = conservateur (montée lente, robuste). Défaut : 3.",
           "default_kint": "Valeur de départ du gain proportionnel intérieur. L'algorithme l'adaptera au fil du temps.",
           "default_kext": "Valeur de départ du gain feedforward extérieur. L'algorithme l'adaptera au fil du temps.",
-          "actuator_mode_override": "Laisser vide pour suivre les métadonnées VTherm. Utiliser ce champ seulement pour forcer switch ou valve.",
-          "valve_curve_compensation_enabled": "Quand cette option est désactivée, l'ouverture de vanne est transmise directement sans compensation non linéaire.",
+          "valve_curve_compensation_enabled": "Quand cette option est désactivée, l'ouverture de vanne est transmise directement sans compensation non linéaire."
+        }
+      },
+      "valve_curve": {
+        "title": "Courbe de vanne Adaptive TPI",
+        "data": {
+          "valve_curve_learning_enabled": "Activer l'apprentissage de courbe de vanne",
+          "valve_min_valve": "Ouverture minimale de vanne",
+          "valve_knee_demand": "Demande au coude de vanne",
+          "valve_knee_valve": "Ouverture au coude de vanne",
+          "valve_max_valve": "Ouverture maximale de vanne"
+        },
+        "data_description": {
           "valve_curve_learning_enabled": "Quand cette option est désactivée, la courbe de vanne conserve les paramètres manuels configurés.",
           "valve_min_valve": "Plus petite ouverture de vanne considérée comme efficace par la courbe.",
           "valve_knee_demand": "Demande linéaire à laquelle la courbe de vanne change de pente.",

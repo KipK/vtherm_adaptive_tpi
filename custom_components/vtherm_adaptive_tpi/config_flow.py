@@ -28,13 +28,14 @@ from .const import (
     CONF_VALVE_MIN_VALVE,
     DEFAULT_OPTIONS,
     DOMAIN,
+    THERMOSTAT_TYPE_VALVE,
 )
 
 ERROR_INVALID_VALVE_CURVE = "invalid_valve_curve"
 
 
-def build_options_schema(defaults: dict[str, Any]) -> vol.Schema:
-    """Build the Adaptive TPI defaults schema."""
+def build_options_main_schema(defaults: dict[str, Any]) -> vol.Schema:
+    """Build the Adaptive TPI main defaults schema."""
     return vol.Schema(
         {
             vol.Optional(
@@ -95,22 +96,21 @@ def build_options_schema(defaults: dict[str, Any]) -> vol.Schema:
                 )
             ),
             vol.Optional(
-                CONF_ACTUATOR_MODE_OVERRIDE,
-                default=defaults[CONF_ACTUATOR_MODE_OVERRIDE],
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=[
-                        selector.SelectOptionDict(value=ACTUATOR_MODE_AUTO, label="Auto"),
-                        selector.SelectOptionDict(value="switch", label="Switch"),
-                        selector.SelectOptionDict(value="valve", label="Valve"),
-                    ],
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
-            ),
-            vol.Optional(
                 CONF_VALVE_CURVE_COMPENSATION_ENABLED,
                 default=defaults[CONF_VALVE_CURVE_COMPENSATION_ENABLED],
             ): bool,
+            vol.Optional(
+                CONF_ADAPTIVE_TPI_DEBUG,
+                default=defaults[CONF_ADAPTIVE_TPI_DEBUG],
+            ): bool,
+        }
+    )
+
+
+def build_valve_curve_schema(defaults: dict[str, Any]) -> vol.Schema:
+    """Build the Adaptive TPI valve curve schema."""
+    return vol.Schema(
+        {
             vol.Optional(
                 CONF_VALVE_CURVE_LEARNING_ENABLED,
                 default=defaults[CONF_VALVE_CURVE_LEARNING_ENABLED],
@@ -159,16 +159,46 @@ def build_options_schema(defaults: dict[str, Any]) -> vol.Schema:
                     mode=selector.NumberSelectorMode.BOX,
                 )
             ),
-            vol.Optional(
-                CONF_ADAPTIVE_TPI_DEBUG,
-                default=defaults[CONF_ADAPTIVE_TPI_DEBUG],
-            ): bool,
         }
     )
 
 
+def build_options_schema(defaults: dict[str, Any]) -> vol.Schema:
+    """Build the complete Adaptive TPI defaults schema."""
+    schema = {}
+    schema.update(build_options_main_schema(defaults).schema)
+    schema.update(build_valve_curve_schema(defaults).schema)
+    return vol.Schema(schema)
+
+
+def build_user_target_schema() -> vol.Schema:
+    """Build the Adaptive TPI target thermostat schema."""
+    return vol.Schema(
+        {
+            vol.Required(CONF_TARGET_VTHERM): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=CLIMATE_DOMAIN)
+            )
+        }
+    )
+
+
+def build_user_main_schema(
+    defaults: dict[str, Any],
+    include_valve_compensation: bool,
+) -> vol.Schema:
+    """Build the Adaptive TPI per-thermostat main schema."""
+    schema = dict(build_options_main_schema(defaults).schema)
+    if not include_valve_compensation:
+        schema = {
+            key: value
+            for key, value in schema.items()
+            if getattr(key, "schema", key) != CONF_VALVE_CURVE_COMPENSATION_ENABLED
+        }
+    return vol.Schema(schema)
+
+
 def build_user_schema(defaults: dict[str, Any]) -> vol.Schema:
-    """Build the Adaptive TPI per-thermostat schema."""
+    """Build the complete Adaptive TPI per-thermostat schema."""
     schema = {
         vol.Required(CONF_TARGET_VTHERM): selector.EntitySelector(
             selector.EntitySelectorConfig(domain=CLIMATE_DOMAIN)
@@ -184,6 +214,23 @@ def _schema_defaults(user_input: Mapping[str, Any] | None = None) -> dict[str, A
     if user_input is not None:
         defaults.update(user_input)
     return defaults
+
+
+def _with_hidden_defaults(user_input: Mapping[str, Any]) -> dict[str, Any]:
+    """Return submitted data completed with hidden fixed defaults."""
+    data = dict(user_input)
+    data[CONF_ACTUATOR_MODE_OVERRIDE] = ACTUATOR_MODE_AUTO
+    return data
+
+
+def _is_valve_state(state: Any) -> bool:
+    """Return whether a VTherm state exposes a valve command space."""
+    attributes = getattr(state, "attributes", {}) or {}
+    configuration = attributes.get("configuration") or {}
+    return (
+        configuration.get("type") == THERMOSTAT_TYPE_VALVE
+        or configuration.get("have_valve_regulation") is True
+    )
 
 
 def _validate_valve_curve_config(config: Mapping[str, Any]) -> dict[str, str]:
@@ -205,6 +252,11 @@ class AdaptiveTPIConfigFlow(ConfigFlow, domain=DOMAIN):
     """Manage Adaptive TPI plugin config entries."""
 
     VERSION = 1
+    _pending_global_data: dict[str, Any] | None = None
+    _pending_thermostat_data: dict[str, Any] | None = None
+    _pending_thermostat_entity_id: str | None = None
+    _pending_thermostat_is_valve: bool = False
+    _pending_thermostat_title: str | None = None
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         """Create default plugin settings on first install."""
@@ -224,22 +276,44 @@ class AdaptiveTPIConfigFlow(ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
 
         if user_input is not None:
-            errors = _validate_valve_curve_config(_schema_defaults(user_input))
-            if errors:
+            self._pending_global_data = _with_hidden_defaults(user_input)
+            if user_input.get(CONF_VALVE_CURVE_COMPENSATION_ENABLED):
                 return self.async_show_form(
-                    step_id="global",
-                    data_schema=build_options_schema(_schema_defaults(user_input)),
-                    errors=errors,
+                    step_id="global_valve_curve",
+                    data_schema=build_valve_curve_schema(_schema_defaults(user_input)),
                 )
-            return self.async_create_entry(title="Adaptive TPI defaults", data=user_input)
+            return self.async_create_entry(
+                title="Adaptive TPI defaults",
+                data=self._pending_global_data,
+            )
 
         return self.async_show_form(
             step_id="global",
-            data_schema=build_options_schema(DEFAULT_OPTIONS),
+            data_schema=build_options_main_schema(DEFAULT_OPTIONS),
+        )
+
+    async def async_step_global_valve_curve(self, user_input: dict[str, Any] | None = None):
+        """Handle the global valve curve defaults entry."""
+        data = dict(self._pending_global_data or _with_hidden_defaults({}))
+
+        if user_input is not None:
+            data.update(user_input)
+            errors = _validate_valve_curve_config(_schema_defaults(data))
+            if errors:
+                return self.async_show_form(
+                    step_id="global_valve_curve",
+                    data_schema=build_valve_curve_schema(_schema_defaults(data)),
+                    errors=errors,
+                )
+            return self.async_create_entry(title="Adaptive TPI defaults", data=data)
+
+        return self.async_show_form(
+            step_id="global_valve_curve",
+            data_schema=build_valve_curve_schema(_schema_defaults(data)),
         )
 
     async def async_step_thermostat(self, user_input: dict[str, Any] | None = None):
-        """Handle the per-thermostat entry."""
+        """Select the target thermostat."""
         if user_input is not None:
             entity_id = user_input.get(CONF_TARGET_VTHERM)
             registry = er.async_get(self.hass)
@@ -247,31 +321,83 @@ class AdaptiveTPIConfigFlow(ConfigFlow, domain=DOMAIN):
             if reg_entry is None or reg_entry.unique_id is None:
                 return self.async_show_form(
                     step_id="thermostat",
-                    data_schema=build_user_schema(DEFAULT_OPTIONS),
+                    data_schema=build_user_target_schema(),
                     errors={CONF_TARGET_VTHERM: "invalid_entity"},
-                )
-
-            errors = _validate_valve_curve_config(_schema_defaults(user_input))
-            if errors:
-                return self.async_show_form(
-                    step_id="thermostat",
-                    data_schema=build_user_schema(_schema_defaults(user_input)),
-                    errors=errors,
                 )
 
             target_unique_id = reg_entry.unique_id
             await self.async_set_unique_id(f"{DOMAIN}-{target_unique_id}")
             self._abort_if_unique_id_configured()
 
-            data = dict(user_input)
-            data[CONF_TARGET_VTHERM] = target_unique_id
             state = self.hass.states.get(entity_id)
-            title = state.name if state is not None else entity_id
-            return self.async_create_entry(title=title, data=data)
+            self._pending_thermostat_data = {
+                CONF_TARGET_VTHERM: target_unique_id,
+                CONF_ACTUATOR_MODE_OVERRIDE: ACTUATOR_MODE_AUTO,
+            }
+            self._pending_thermostat_entity_id = entity_id
+            self._pending_thermostat_is_valve = state is not None and _is_valve_state(state)
+            self._pending_thermostat_title = state.name if state is not None else entity_id
+            return await self.async_step_thermostat_settings()
 
         return self.async_show_form(
             step_id="thermostat",
-            data_schema=build_user_schema(DEFAULT_OPTIONS),
+            data_schema=build_user_target_schema(),
+        )
+
+    async def async_step_thermostat_settings(
+        self, user_input: dict[str, Any] | None = None
+    ):
+        """Handle the per-thermostat main settings entry."""
+        data = dict(self._pending_thermostat_data or _with_hidden_defaults({}))
+
+        if user_input is not None:
+            data.update(user_input)
+            self._pending_thermostat_data = data
+            if (
+                self._pending_thermostat_is_valve
+                and user_input.get(CONF_VALVE_CURVE_COMPENSATION_ENABLED)
+            ):
+                return self.async_show_form(
+                    step_id="thermostat_valve_curve",
+                    data_schema=build_valve_curve_schema(_schema_defaults(user_input)),
+                )
+
+            return self.async_create_entry(
+                title=self._pending_thermostat_title or self._pending_thermostat_entity_id,
+                data=data,
+            )
+
+        return self.async_show_form(
+            step_id="thermostat_settings",
+            data_schema=build_user_main_schema(
+                _schema_defaults(data),
+                self._pending_thermostat_is_valve,
+            ),
+        )
+
+    async def async_step_thermostat_valve_curve(
+        self, user_input: dict[str, Any] | None = None
+    ):
+        """Handle the per-thermostat valve curve entry."""
+        data = dict(self._pending_thermostat_data or _with_hidden_defaults({}))
+
+        if user_input is not None:
+            data.update(user_input)
+            errors = _validate_valve_curve_config(_schema_defaults(data))
+            if errors:
+                return self.async_show_form(
+                    step_id="thermostat_valve_curve",
+                    data_schema=build_valve_curve_schema(_schema_defaults(data)),
+                    errors=errors,
+                )
+            return self.async_create_entry(
+                title=self._pending_thermostat_title or self._pending_thermostat_entity_id,
+                data=data,
+            )
+
+        return self.async_show_form(
+            step_id="thermostat_valve_curve",
+            data_schema=build_valve_curve_schema(_schema_defaults(data)),
         )
 
     @staticmethod
@@ -286,6 +412,7 @@ class AdaptiveTPIOptionsFlow(OptionsFlow):
     def __init__(self, config_entry) -> None:
         """Store the config entry being edited."""
         self._config_entry = config_entry
+        self._pending_options_data: dict[str, Any] | None = None
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         """Handle the options flow."""
@@ -294,17 +421,38 @@ class AdaptiveTPIOptionsFlow(OptionsFlow):
 
         if user_input is not None:
             submitted_defaults = dict(defaults)
-            submitted_defaults.update(user_input)
-            errors = _validate_valve_curve_config(submitted_defaults)
-            if errors:
+            submitted_defaults.update(_with_hidden_defaults(user_input))
+            self._pending_options_data = submitted_defaults
+            if user_input.get(CONF_VALVE_CURVE_COMPENSATION_ENABLED):
                 return self.async_show_form(
-                    step_id="init",
-                    data_schema=build_options_schema(submitted_defaults),
-                    errors=errors,
+                    step_id="valve_curve",
+                    data_schema=build_valve_curve_schema(submitted_defaults),
                 )
-            return self.async_create_entry(title="", data=user_input)
+            return self.async_create_entry(title="", data=submitted_defaults)
 
         return self.async_show_form(
             step_id="init",
-            data_schema=build_options_schema(defaults),
+            data_schema=build_options_main_schema(defaults),
+        )
+
+    async def async_step_valve_curve(self, user_input: dict[str, Any] | None = None):
+        """Handle the options valve curve flow."""
+        defaults = dict(DEFAULT_OPTIONS)
+        defaults.update(self._config_entry.options or self._config_entry.data)
+        data = dict(self._pending_options_data or defaults)
+
+        if user_input is not None:
+            data.update(user_input)
+            errors = _validate_valve_curve_config(data)
+            if errors:
+                return self.async_show_form(
+                    step_id="valve_curve",
+                    data_schema=build_valve_curve_schema(_schema_defaults(data)),
+                    errors=errors,
+                )
+            return self.async_create_entry(title="", data=data)
+
+        return self.async_show_form(
+            step_id="valve_curve",
+            data_schema=build_valve_curve_schema(_schema_defaults(data)),
         )

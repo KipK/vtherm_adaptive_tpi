@@ -10,21 +10,26 @@
           "responsiveness": "Responsiveness",
           "default_kint": "Initial Kint (indoor gain)",
           "default_kext": "Initial Kext (outdoor gain)",
-          "actuator_mode_override": "Actuator mode override",
           "valve_curve_compensation_enabled": "Enable valve curve compensation",
-          "valve_curve_learning_enabled": "Enable valve curve learning",
-          "valve_min_valve": "Valve minimum opening",
-          "valve_knee_demand": "Valve knee demand",
-          "valve_knee_valve": "Valve knee opening",
-          "valve_max_valve": "Valve maximum opening",
           "adaptive_tpi_debug": "Debug mode"
         },
         "data_description": {
           "responsiveness": "Controls setpoint tracking speed. 1 = aggressive (fast rise, higher overshoot risk), 5 = conservative (slow rise, robust). Default: 3.",
           "default_kint": "Starting value for the proportional indoor gain. The algorithm will adapt it over time.",
           "default_kext": "Starting value for the outdoor feedforward gain. The algorithm will adapt it over time.",
-          "actuator_mode_override": "Leave empty to follow VTherm metadata. Use this only to force switch or valve behavior.",
-          "valve_curve_compensation_enabled": "When disabled, the valve opening is sent directly without non-linear compensation.",
+          "valve_curve_compensation_enabled": "When disabled, the valve opening is sent directly without non-linear compensation."
+        }
+      },
+      "global_valve_curve": {
+        "title": "Adaptive TPI valve curve",
+        "data": {
+          "valve_curve_learning_enabled": "Enable valve curve learning",
+          "valve_min_valve": "Valve minimum opening",
+          "valve_knee_demand": "Valve knee demand",
+          "valve_knee_valve": "Valve knee opening",
+          "valve_max_valve": "Valve maximum opening"
+        },
+        "data_description": {
           "valve_curve_learning_enabled": "When disabled, the valve curve keeps the configured manual parameters.",
           "valve_min_valve": "Smallest valve opening considered effective by the curve.",
           "valve_knee_demand": "Linear demand at which the valve curve changes slope.",
@@ -35,27 +40,37 @@
       "thermostat": {
         "title": "Adaptive TPI per-thermostat",
         "data": {
-          "target_vtherm_unique_id": "Target thermostat",
+          "target_vtherm_unique_id": "Target thermostat"
+        }
+      },
+      "thermostat_settings": {
+        "title": "Adaptive TPI per-thermostat",
+        "data": {
           "minimal_activation_delay": "Minimal activation delay",
           "minimal_deactivation_delay": "Minimal deactivation delay",
           "responsiveness": "Responsiveness",
           "default_kint": "Initial Kint (indoor gain)",
           "default_kext": "Initial Kext (outdoor gain)",
-          "actuator_mode_override": "Actuator mode override",
           "valve_curve_compensation_enabled": "Enable valve curve compensation",
-          "valve_curve_learning_enabled": "Enable valve curve learning",
-          "valve_min_valve": "Valve minimum opening",
-          "valve_knee_demand": "Valve knee demand",
-          "valve_knee_valve": "Valve knee opening",
-          "valve_max_valve": "Valve maximum opening",
           "adaptive_tpi_debug": "Debug mode"
         },
         "data_description": {
           "responsiveness": "Controls setpoint tracking speed. 1 = aggressive (fast rise, higher overshoot risk), 5 = conservative (slow rise, robust). Default: 3.",
           "default_kint": "Starting value for the proportional indoor gain. The algorithm will adapt it over time.",
           "default_kext": "Starting value for the outdoor feedforward gain. The algorithm will adapt it over time.",
-          "actuator_mode_override": "Leave empty to follow VTherm metadata. Use this only to force switch or valve behavior.",
-          "valve_curve_compensation_enabled": "When disabled, the valve opening is sent directly without non-linear compensation.",
+          "valve_curve_compensation_enabled": "When disabled, the valve opening is sent directly without non-linear compensation."
+        }
+      },
+      "thermostat_valve_curve": {
+        "title": "Adaptive TPI valve curve",
+        "data": {
+          "valve_curve_learning_enabled": "Enable valve curve learning",
+          "valve_min_valve": "Valve minimum opening",
+          "valve_knee_demand": "Valve knee demand",
+          "valve_knee_valve": "Valve knee opening",
+          "valve_max_valve": "Valve maximum opening"
+        },
+        "data_description": {
           "valve_curve_learning_enabled": "When disabled, the valve curve keeps the configured manual parameters.",
           "valve_min_valve": "Smallest valve opening considered effective by the curve.",
           "valve_knee_demand": "Linear demand at which the valve curve changes slope.",
@@ -84,21 +99,26 @@
           "responsiveness": "Responsiveness",
           "default_kint": "Initial Kint (indoor gain)",
           "default_kext": "Initial Kext (outdoor gain)",
-          "actuator_mode_override": "Actuator mode override",
           "valve_curve_compensation_enabled": "Enable valve curve compensation",
-          "valve_curve_learning_enabled": "Enable valve curve learning",
-          "valve_min_valve": "Valve minimum opening",
-          "valve_knee_demand": "Valve knee demand",
-          "valve_knee_valve": "Valve knee opening",
-          "valve_max_valve": "Valve maximum opening",
           "adaptive_tpi_debug": "Debug mode"
         },
         "data_description": {
           "responsiveness": "Controls setpoint tracking speed. 1 = aggressive (fast rise, higher overshoot risk), 5 = conservative (slow rise, robust). Default: 3.",
           "default_kint": "Starting value for the proportional indoor gain. The algorithm will adapt it over time.",
           "default_kext": "Starting value for the outdoor feedforward gain. The algorithm will adapt it over time.",
-          "actuator_mode_override": "Leave empty to follow VTherm metadata. Use this only to force switch or valve behavior.",
-          "valve_curve_compensation_enabled": "When disabled, the valve opening is sent directly without non-linear compensation.",
+          "valve_curve_compensation_enabled": "When disabled, the valve opening is sent directly without non-linear compensation."
+        }
+      },
+      "valve_curve": {
+        "title": "Adaptive TPI valve curve",
+        "data": {
+          "valve_curve_learning_enabled": "Enable valve curve learning",
+          "valve_min_valve": "Valve minimum opening",
+          "valve_knee_demand": "Valve knee demand",
+          "valve_knee_valve": "Valve knee opening",
+          "valve_max_valve": "Valve maximum opening"
+        },
+        "data_description": {
           "valve_curve_learning_enabled": "When disabled, the valve curve keeps the configured manual parameters.",
           "valve_min_valve": "Smallest valve opening considered effective by the curve.",
           "valve_knee_demand": "Linear demand at which the valve curve changes slope.",

@@ -11,13 +11,51 @@
           "responsiveness": "Responsiveness (1=aggressive … 5=conservative)",
           "default_kint": "Initial Kint (indoor gain)",
           "default_kext": "Initial Kext (outdoor gain)",
-          "actuator_mode_override": "Actuator mode override",
+          "valve_curve_compensation_enabled": "Enable valve curve compensation",
+          "adaptive_tpi_debug": "Enable debug mode"
+        }
+      },
+      "global_valve_curve": {
+        "title": "Adaptive TPI valve curve",
+        "data": {
           "valve_curve_learning_enabled": "Enable valve curve learning",
           "valve_min_valve": "Valve minimum opening",
           "valve_knee_demand": "Valve knee demand",
           "valve_knee_valve": "Valve knee opening",
-          "valve_max_valve": "Valve maximum opening",
+          "valve_max_valve": "Valve maximum opening"
+        }
+      },
+      "thermostat_settings": {
+        "title": "Adaptive TPI",
+        "description": "Configure an Adaptive TPI plugin entry.",
+        "data": {
+          "minimal_activation_delay": "Minimal activation delay",
+          "minimal_deactivation_delay": "Minimal deactivation delay",
+          "responsiveness": "Responsiveness (1=aggressive … 5=conservative)",
+          "default_kint": "Initial Kint (indoor gain)",
+          "default_kext": "Initial Kext (outdoor gain)",
+          "valve_curve_compensation_enabled": "Enable valve curve compensation",
           "adaptive_tpi_debug": "Enable debug mode"
+        }
+      },
+      "thermostat_valve_curve": {
+        "title": "Adaptive TPI valve curve",
+        "data": {
+          "valve_curve_learning_enabled": "Enable valve curve learning",
+          "valve_min_valve": "Valve minimum opening",
+          "valve_knee_demand": "Valve knee demand",
+          "valve_knee_valve": "Valve knee opening",
+          "valve_max_valve": "Valve maximum opening"
+        }
+      },
+      "valve_curve": {
+        "title": "Adaptive TPI valve curve",
+        "data": {
+          "valve_curve_learning_enabled": "Enable valve curve learning",
+          "valve_min_valve": "Valve minimum opening",
+          "valve_knee_demand": "Valve knee demand",
+          "valve_knee_valve": "Valve knee opening",
+          "valve_max_valve": "Valve maximum opening"
         }
       }
     },
