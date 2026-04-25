@@ -104,114 +104,112 @@ No `specific_states.adaptive_tpi` data found for `{{ entity }}`.
 
 {% if debug %}`🛠️ Debug active`{% endif %}
 
-| Overview | Value |
-|---|---|
-| 🧭 Phase | **{{ phase }}** |
-| 🌡️ Mode | **{{ hvac_mode }}** |
-| {{ icon_control }} Current cycle | **{{ current_cycle_text }}** |
-| ⏭️ Next cycle | **{{ next_cycle_text }}** |
-| 🚀 Startup | **{{ 'Active - ' ~ stage if startup_active else 'Inactive' }}** |
+| Overview                         | Value                                                           |
+| -------------------------------- | --------------------------------------------------------------- |
+| 🧭 Phase                          | **{{ phase }}**                                                 |
+| 🌡️ Mode                           | **{{ hvac_mode }}**                                             |
+| {{ icon_control }} Current cycle | **{{ current_cycle_text }}**                                    |
+| ⏭️ Next cycle                     | **{{ next_cycle_text }}**                                       |
+| 🚀 Startup                        | **{{ 'Active - ' ~ stage if startup_active else 'Inactive' }}** |
 
-| Learning | Value |
-|---|---|
-| ⏳ Deadtime | **{{ deadtime_text }}** |
-| 🎯 Deadtime confidence | **{{ deadtime_conf_text }}** |
-| ⏱️ Deadtime ON | **{{ deadtime_on_text }} · {{ 'locked' if deadtime_on_locked else 'learning' }} · {{ deadtime_on_conf_text }}** |
-| 📴 Deadtime OFF | **{{ deadtime_off_text }} · {{ 'locked' if deadtime_off_locked else 'learning' }} · {{ deadtime_off_conf_text }}** |
-| 🎚️ Indoor gain | **{{ gain_indoor_text }}** |
-| 🌤️ Outdoor gain | **{{ gain_outdoor_text }}** |
-| {{ icon_control }} {{ label_control }} | **{{ control_rate_text }}** |
-| {{ icon_drift }} {{ label_drift }} | **{{ drift_rate_text }}** |
-| 🏠 Thermal constant | **{{ tau_text }}** |
+| Learning                               | Value                                                                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| ⏱️ Deadtime ON                          | **{{ deadtime_on_text }} · {{ 'locked' if deadtime_on_locked else 'learning' }} · {{ deadtime_on_conf_text }}**    |
+| 📴 Deadtime OFF                         | **{{ deadtime_off_text }} · {{ 'locked' if deadtime_off_locked else 'learning' }} · {{ deadtime_off_conf_text }}** |
+| 🎚️ Indoor gain                          | **{{ gain_indoor_text }}**                                                                                         |
+| 🌤️ Outdoor gain                         | **{{ gain_outdoor_text }}**                                                                                        |
+| {{ icon_control }} {{ label_control }} | **{{ control_rate_text }}**                                                                                        |
+| {{ icon_drift }} {{ label_drift }}     | **{{ drift_rate_text }}**                                                                                          |
+| 🏠 Thermal constant                     | **{{ tau_text }}**                                                                                                 |
 
-| Model status | Value |
-|---|---|
-| {{ icon_drift }} Drift model | **{{ 'Stable' if drift_converged else 'Learning' }}** |
-| {{ icon_control }} Control model | **{{ 'Stable' if control_converged else 'Learning' }}** |
-| {{ icon_control }} Control learning | **{{ 'Allowed' if control_enabled else 'Not yet' }}** |
-| {{ icon_drift }} Drift samples | **{{ (drift_samples if drift_samples is not none else 0) ~ ' / ' ~ sample_window_size }}** |
-| {{ icon_control }} Control samples | **{{ (control_samples if control_samples is not none else 0) ~ ' / ' ~ sample_window_size }}** |
+| Model status                        | Value                                                                                          |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------- |
+| {{ icon_drift }} Drift model        | **{{ 'Stable' if drift_converged else 'Learning' }}**                                          |
+| {{ icon_control }} Control model    | **{{ 'Stable' if control_converged else 'Learning' }}**                                        |
+| {{ icon_control }} Control learning | **{{ 'Allowed' if control_enabled else 'Not yet' }}**                                          |
+| {{ icon_drift }} Drift samples      | **{{ (drift_samples if drift_samples is not none else 0) ~ ' / ' ~ sample_window_size }}**     |
+| {{ icon_control }} Control samples  | **{{ (control_samples if control_samples is not none else 0) ~ ' / ' ~ sample_window_size }}** |
 
 {% if actuator_mode == 'valve' %}
-| Valve curve | Value |
-|---|---|
-| 🧩 Actuator mode | **{{ actuator_mode_text }}** |
-| 📈 Curve learning | **{{ valve_curve_status_text }}** |
+| Valve curve             | Value                                                                                               |
+| ----------------------- | --------------------------------------------------------------------------------------------------- |
+| 🧩 Actuator mode         | **{{ actuator_mode_text }}**                                                                        |
+| 📈 Curve learning        | **{{ valve_curve_status_text }}**                                                                   |
 | ✅ Accepted observations | **{{ valve_curve_observations_accepted if valve_curve_observations_accepted is not none else 0 }}** |
 | 🚫 Rejected observations | **{{ valve_curve_observations_rejected if valve_curve_observations_rejected is not none else 0 }}** |
-| 📝 Last curve result | **{{ '`' ~ valve_curve_reason_text ~ '`' }}** |
+| 📝 Last curve result     | **{{ '`' ~ valve_curve_reason_text ~ '`' }}**                                                       |
 
-| Demand vs applied power | Value |
-|---|---|
-| 🎯 Linear demand | **{{ calculated_cycle_text }}** |
-| 🛞 Requested valve command | **{{ requested_cycle_text }}** |
-| ⚙️ Applied power | **{{ committed_cycle_text }}** |
+| Demand vs applied power   | Value                           |
+| ------------------------- | ------------------------------- |
+| 🎯 Linear demand           | **{{ calculated_cycle_text }}** |
+| 🛞 Requested valve command | **{{ requested_cycle_text }}**  |
+| ⚙️ Applied power           | **{{ committed_cycle_text }}**  |
 
-| Valve curve parameters | Value |
-|---|---|
-| `min_valve` | **{{ valve_curve_params.get('min_valve') | round(1) }} %** |
-| `knee_demand` | **{{ valve_curve_params.get('knee_demand') | round(1) }} %** |
-| `knee_valve` | **{{ valve_curve_params.get('knee_valve') | round(1) }} %** |
-| `max_valve` | **{{ valve_curve_params.get('max_valve') | round(1) }} %** |
+| Valve curve parameters | Value                                      |
+| ---------------------- | ------------------------------------------ |
+| `min_valve`            | **{{ valve_curve_params.get('min_valve')   | round(1) }} %** |
+| `knee_demand`          | **{{ valve_curve_params.get('knee_demand') | round(1) }} %** |
+| `knee_valve`           | **{{ valve_curve_params.get('knee_valve')  | round(1) }} %** |
+| `max_valve`            | **{{ valve_curve_params.get('max_valve')   | round(1) }} %** |
 {% endif %}
 
-| Recent activity | Value |
-|---|---|
-| 🔁 Last family | **{{ last_family }}** |
-| ✅ Last result | **{{ '`' ~ last_result ~ '`' if last_result else 'No recent result' }}** |
-| 🚧 Blocker | **{{ '`' ~ last_blocker ~ '`' if last_blocker else 'None' }}** |
+| Recent activity | Value                                                                    |
+| --------------- | ------------------------------------------------------------------------ |
+| 🔁 Last family   | **{{ last_family }}**                                                    |
+| ✅ Last result   | **{{ '`' ~ last_result ~ '`' if last_result else 'No recent result' }}** |
+| 🚧 Blocker       | **{{ '`' ~ last_blocker ~ '`' if last_blocker else 'None' }}**           |
 
 {% if startup_active or startup_done %}
-| Startup sequence | Value |
-|---|---|
-| 🪜 Stage | **{{ stage }}** |
-| 🔄 Attempt | **{{ startup_attempt_text }}** |
-| 🏁 Completion | **{{ '`' ~ startup_done ~ '`' if startup_done else 'In progress' }}** |
-| ⏱️ ON acquired | **{{ 'Yes' if deadtime_on_locked else 'No' }}** |
-| 📴 OFF acquired | **{{ 'Yes' if deadtime_off_locked else 'No' }}** |
+| Startup sequence | Value                                                                 |
+| ---------------- | --------------------------------------------------------------------- |
+| 🪜 Stage          | **{{ stage }}**                                                       |
+| 🔄 Attempt        | **{{ startup_attempt_text }}**                                        |
+| 🏁 Completion     | **{{ '`' ~ startup_done ~ '`' if startup_done else 'In progress' }}** |
+| ⏱️ ON acquired    | **{{ 'Yes' if deadtime_on_locked else 'No' }}**                       |
+| 📴 OFF acquired   | **{{ 'Yes' if deadtime_off_locked else 'No' }}**                      |
 {% endif %}
 
 {% if debug %}
 ## 🛠️ Debug
 
-| Power / cycles | Value |
-|---|---|
-| `calculated_on_percent` | {{ ((debug.get('calculated_on_percent') * 100) | round(0) ~ ' %') if debug.get('calculated_on_percent') is not none else 'Unavailable' }} |
-| `requested_on_percent` | {{ ((debug.get('requested_on_percent') * 100) | round(0) ~ ' %') if debug.get('requested_on_percent') is not none else 'Unavailable' }} |
-| `committed_on_percent` | {{ ((debug.get('committed_on_percent') * 100) | round(0) ~ ' %') if debug.get('committed_on_percent') is not none else 'Unavailable' }} |
-| `current_cycle_regime` | `{{ debug.get('current_cycle_regime', 'unavailable') }}` |
+| Power / cycles              | Value                                                         |
+| --------------------------- | ------------------------------------------------------------- |
+| `calculated_on_percent`     | {{ ((debug.get('calculated_on_percent') * 100)                | round(0) ~ ' %') if debug.get('calculated_on_percent') is not none else 'Unavailable' }} |
+| `requested_on_percent`      | {{ ((debug.get('requested_on_percent') * 100)                 | round(0) ~ ' %') if debug.get('requested_on_percent') is not none else 'Unavailable' }}  |
+| `committed_on_percent`      | {{ ((debug.get('committed_on_percent') * 100)                 | round(0) ~ ' %') if debug.get('committed_on_percent') is not none else 'Unavailable' }}  |
+| `current_cycle_regime`      | `{{ debug.get('current_cycle_regime', 'unavailable') }}`      |
 | `last_cycle_classification` | `{{ debug.get('last_cycle_classification', 'unavailable') }}` |
-| `accepted_cycles_count` | {{ debug.get('accepted_cycles_count', 'unavailable') }} |
-| `valid_cycles_count` | {{ debug.get('valid_cycles_count', 'unavailable') }} |
+| `accepted_cycles_count`     | {{ debug.get('accepted_cycles_count', 'unavailable') }}       |
+| `valid_cycles_count`        | {{ debug.get('valid_cycles_count', 'unavailable') }}          |
 
-| Routing / estimation | Value |
-|---|---|
-| `learning_route_selected` | `{{ debug.get('learning_route_selected', 'unavailable') }}` |
-| `learning_route_block_reason` | {{ '`' ~ debug.get('learning_route_block_reason') ~ '`' if debug.get('learning_route_block_reason') else 'None' }} |
+| Routing / estimation           | Value                                                                                                                       |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `learning_route_selected`      | `{{ debug.get('learning_route_selected', 'unavailable') }}`                                                                 |
+| `learning_route_block_reason`  | {{ '`' ~ debug.get('learning_route_block_reason') ~ '`' if debug.get('learning_route_block_reason') else 'None' }}          |
 | `last_learning_attempt_reason` | {{ '`' ~ debug.get('last_learning_attempt_reason') ~ '`' if debug.get('last_learning_attempt_reason') else 'Unavailable' }} |
-| `a_hat` | {{ debug.get('a_hat') | round(4) if debug.get('a_hat') is not none else 'Unavailable' }} |
-| `b_hat` | {{ debug.get('b_hat') | round(4) if debug.get('b_hat') is not none else 'Unavailable' }} |
-| `c_a` | {{ ((debug.get('c_a') * 100) | round(0) ~ ' %') if debug.get('c_a') is not none else 'Unavailable' }} |
-| `c_b` | {{ ((debug.get('c_b') * 100) | round(0) ~ ' %') if debug.get('c_b') is not none else 'Unavailable' }} |
-| `control_rate_converged` | {{ 'Yes' if debug.get('control_rate_converged') else 'No' }} |
-| `b_converged` | {{ 'Yes' if debug.get('b_converged') else 'No' }} |
+| `a_hat`                        | {{ debug.get('a_hat')                                                                                                       | round(4) if debug.get('a_hat') is not none else 'Unavailable' }}       |
+| `b_hat`                        | {{ debug.get('b_hat')                                                                                                       | round(4) if debug.get('b_hat') is not none else 'Unavailable' }}       |
+| `c_a`                          | {{ ((debug.get('c_a') * 100)                                                                                                | round(0) ~ ' %') if debug.get('c_a') is not none else 'Unavailable' }} |
+| `c_b`                          | {{ ((debug.get('c_b') * 100)                                                                                                | round(0) ~ ' %') if debug.get('c_b') is not none else 'Unavailable' }} |
+| `control_rate_converged`       | {{ 'Yes' if debug.get('control_rate_converged') else 'No' }}                                                                |
+| `b_converged`                  | {{ 'Yes' if debug.get('b_converged') else 'No' }}                                                                           |
 
-| Deadtime | Value |
-|---|---|
-| `nd_hat` | {{ debug.get('nd_hat') | round(2) if debug.get('nd_hat') is not none else 'Unavailable' }} |
-| `deadtime_min` | {{ (debug.get('deadtime_min') | round(1) ~ ' min') if debug.get('deadtime_min') is not none else 'Unavailable' }} |
-| `deadtime_locked` | {{ 'Yes' if debug.get('deadtime_locked') else 'No' }} |
-| `deadtime_on_cycles` | {{ debug.get('deadtime_on_cycles') | round(2) if debug.get('deadtime_on_cycles') is not none else 'Unavailable' }} |
-| `deadtime_on_minutes` | {{ (debug.get('deadtime_on_minutes') | round(1) ~ ' min') if debug.get('deadtime_on_minutes') is not none else 'Unavailable' }} |
-| `deadtime_on_confidence` | {{ ((debug.get('deadtime_on_confidence') * 100) | round(0) ~ ' %') if debug.get('deadtime_on_confidence') is not none else 'Unavailable' }} |
-| `deadtime_on_locked` | {{ 'Yes' if debug.get('deadtime_on_locked') else 'No' }} |
-| `deadtime_off_cycles` | {{ debug.get('deadtime_off_cycles') | round(2) if debug.get('deadtime_off_cycles') is not none else 'Unavailable' }} |
-| `deadtime_off_minutes` | {{ (debug.get('deadtime_off_minutes') | round(1) ~ ' min') if debug.get('deadtime_off_minutes') is not none else 'Unavailable' }} |
-| `deadtime_off_confidence` | {{ ((debug.get('deadtime_off_confidence') * 100) | round(0) ~ ' %') if debug.get('deadtime_off_confidence') is not none else 'Unavailable' }} |
-| `deadtime_off_locked` | {{ 'Yes' if debug.get('deadtime_off_locked') else 'No' }} |
-| `deadtime_pending_step` | {{ 'Yes' if debug.get('deadtime_pending_step') else 'No' }} |
+| Deadtime                        | Value                                                           |
+| ------------------------------- | --------------------------------------------------------------- |
+| `nd_hat`                        | {{ debug.get('nd_hat')                                          | round(2) if debug.get('nd_hat') is not none else 'Unavailable' }}                          |
+| `deadtime_min`                  | {{ (debug.get('deadtime_min')                                   | round(1) ~ ' min') if debug.get('deadtime_min') is not none else 'Unavailable' }}          |
+| `deadtime_locked`               | {{ 'Yes' if debug.get('deadtime_locked') else 'No' }}           |
+| `deadtime_on_cycles`            | {{ debug.get('deadtime_on_cycles')                              | round(2) if debug.get('deadtime_on_cycles') is not none else 'Unavailable' }}              |
+| `deadtime_on_minutes`           | {{ (debug.get('deadtime_on_minutes')                            | round(1) ~ ' min') if debug.get('deadtime_on_minutes') is not none else 'Unavailable' }}   |
+| `deadtime_on_confidence`        | {{ ((debug.get('deadtime_on_confidence') * 100)                 | round(0) ~ ' %') if debug.get('deadtime_on_confidence') is not none else 'Unavailable' }}  |
+| `deadtime_on_locked`            | {{ 'Yes' if debug.get('deadtime_on_locked') else 'No' }}        |
+| `deadtime_off_cycles`           | {{ debug.get('deadtime_off_cycles')                             | round(2) if debug.get('deadtime_off_cycles') is not none else 'Unavailable' }}             |
+| `deadtime_off_minutes`          | {{ (debug.get('deadtime_off_minutes')                           | round(1) ~ ' min') if debug.get('deadtime_off_minutes') is not none else 'Unavailable' }}  |
+| `deadtime_off_confidence`       | {{ ((debug.get('deadtime_off_confidence') * 100)                | round(0) ~ ' %') if debug.get('deadtime_off_confidence') is not none else 'Unavailable' }} |
+| `deadtime_off_locked`           | {{ 'Yes' if debug.get('deadtime_off_locked') else 'No' }}       |
+| `deadtime_pending_step`         | {{ 'Yes' if debug.get('deadtime_pending_step') else 'No' }}     |
 | `deadtime_identification_count` | {{ debug.get('deadtime_identification_count', 'unavailable') }} |
-| `deadtime_b_proxy` | {{ debug.get('deadtime_b_proxy') | round(4) if debug.get('deadtime_b_proxy') is not none else 'Unavailable' }} |
-| `b_methods_consistent` | {{ 'Yes' if debug.get('b_methods_consistent') else 'No' }} |
+| `deadtime_b_proxy`              | {{ debug.get('deadtime_b_proxy')                                | round(4) if debug.get('deadtime_b_proxy') is not none else 'Unavailable' }}                |
+| `b_methods_consistent`          | {{ 'Yes' if debug.get('b_methods_consistent') else 'No' }}      |
 {% endif %}
 {% endif %}
