@@ -837,7 +837,7 @@ class AdaptiveTPIAlgorithm:
         """Return the currently applied heating fraction."""
         if not self._temperature_available:
             return None
-        return self._state.committed_on_percent
+        return self._state.requested_on_percent
 
     @property
     def requested_on_percent(self) -> float | None:

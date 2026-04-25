@@ -548,7 +548,7 @@ def test_startup_bootstrap_cools_down_immediately_when_temperature_is_at_setpoin
 
     diagnostics = algo.get_diagnostics()
     assert algo.requested_on_percent == pytest.approx(0.0)
-    assert algo.on_percent == pytest.approx(0.0)
+    assert algo._state.committed_on_percent == pytest.approx(0.0)
     assert diagnostics["startup_sequence_active"] is True
     assert diagnostics["startup_sequence_stage"] == "passive_drift_phase"
     assert diagnostics["startup_sequence_attempt"] == 1
@@ -567,7 +567,7 @@ def test_startup_bootstrap_retries_deadtime_cycle_when_one_family_is_missing() -
     )
     diagnostics = algo.get_diagnostics()
     assert algo.requested_on_percent == pytest.approx(0.0)
-    assert algo.on_percent == pytest.approx(0.0)
+    assert algo._state.committed_on_percent == pytest.approx(0.0)
     assert diagnostics["startup_sequence_stage"] == "passive_drift_phase"
 
     algo.calculate(
@@ -579,7 +579,7 @@ def test_startup_bootstrap_retries_deadtime_cycle_when_one_family_is_missing() -
     )
     diagnostics = algo.get_diagnostics()
     assert algo.requested_on_percent == pytest.approx(1.0)
-    assert algo.on_percent == pytest.approx(0.0)
+    assert algo._state.committed_on_percent == pytest.approx(0.0)
     assert diagnostics["startup_sequence_stage"] == "reactivation_to_upper_target"
 
     algo.calculate(
@@ -591,7 +591,7 @@ def test_startup_bootstrap_retries_deadtime_cycle_when_one_family_is_missing() -
     )
     diagnostics = algo.get_diagnostics()
     assert algo.requested_on_percent == pytest.approx(0.0)
-    assert algo.on_percent == pytest.approx(0.0)
+    assert algo._state.committed_on_percent == pytest.approx(0.0)
     assert diagnostics["startup_sequence_stage"] == "return_to_target"
 
     algo.calculate(
@@ -604,7 +604,7 @@ def test_startup_bootstrap_retries_deadtime_cycle_when_one_family_is_missing() -
 
     diagnostics = algo.get_diagnostics()
     assert algo.requested_on_percent == pytest.approx(0.0)
-    assert algo.on_percent == pytest.approx(0.0)
+    assert algo._state.committed_on_percent == pytest.approx(0.0)
     assert diagnostics["startup_sequence_active"] is True
     assert diagnostics["startup_sequence_stage"] == "passive_drift_phase"
     assert diagnostics["startup_sequence_attempt"] == 2
@@ -624,7 +624,7 @@ def test_startup_bootstrap_retries_deadtime_cycle_in_cool_mode() -> None:
     )
     diagnostics = algo.get_diagnostics()
     assert algo.requested_on_percent == pytest.approx(0.0)
-    assert algo.on_percent == pytest.approx(0.0)
+    assert algo._state.committed_on_percent == pytest.approx(0.0)
     assert diagnostics["startup_sequence_stage"] == "passive_drift_phase"
 
     algo.calculate(
@@ -636,7 +636,7 @@ def test_startup_bootstrap_retries_deadtime_cycle_in_cool_mode() -> None:
     )
     diagnostics = algo.get_diagnostics()
     assert algo.requested_on_percent == pytest.approx(1.0)
-    assert algo.on_percent == pytest.approx(0.0)
+    assert algo._state.committed_on_percent == pytest.approx(0.0)
     assert diagnostics["startup_sequence_stage"] == "reactivation_to_upper_target"
 
     algo.calculate(
@@ -648,7 +648,7 @@ def test_startup_bootstrap_retries_deadtime_cycle_in_cool_mode() -> None:
     )
     diagnostics = algo.get_diagnostics()
     assert algo.requested_on_percent == pytest.approx(0.0)
-    assert algo.on_percent == pytest.approx(0.0)
+    assert algo._state.committed_on_percent == pytest.approx(0.0)
     assert diagnostics["startup_sequence_stage"] == "return_to_target"
 
     algo.calculate(
@@ -661,7 +661,7 @@ def test_startup_bootstrap_retries_deadtime_cycle_in_cool_mode() -> None:
 
     diagnostics = algo.get_diagnostics()
     assert algo.requested_on_percent == pytest.approx(0.0)
-    assert algo.on_percent == pytest.approx(0.0)
+    assert algo._state.committed_on_percent == pytest.approx(0.0)
     assert diagnostics["startup_sequence_active"] is True
     assert diagnostics["startup_sequence_stage"] == "passive_drift_phase"
     assert diagnostics["startup_sequence_attempt"] == 2
@@ -702,7 +702,7 @@ def test_startup_bootstrap_returns_to_target_after_on_and_off_deadtime_cycle() -
     assert diagnostics["startup_sequence_stage"] == "return_to_target"
     assert diagnostics["startup_sequence_completion_reason"] is None
     assert algo.requested_on_percent == pytest.approx(0.0)
-    assert algo.on_percent == pytest.approx(0.0)
+    assert algo._state.committed_on_percent == pytest.approx(0.0)
 
     algo.calculate(
         target_temp=20.0,
@@ -764,7 +764,7 @@ def test_startup_bootstrap_exits_at_target_if_both_deadtimes_arrive_after_reheat
     assert diagnostics["startup_sequence_stage"] == "completed"
     assert diagnostics["startup_sequence_completion_reason"] == "deadtime_on_off_identified"
     assert algo.requested_on_percent == pytest.approx(0.0)
-    assert algo.on_percent == pytest.approx(0.0)
+    assert algo._state.committed_on_percent == pytest.approx(0.0)
 
 
 def test_startup_bootstrap_keeps_retrying_without_both_deadtimes() -> None:
@@ -812,7 +812,7 @@ def test_startup_bootstrap_keeps_retrying_without_both_deadtimes() -> None:
     assert diagnostics["startup_sequence_stage"] == "reactivation_to_upper_target"
     assert diagnostics["startup_sequence_completion_reason"] == "deadtime_on_off_retry"
     assert algo.requested_on_percent == pytest.approx(1.0)
-    assert algo.on_percent == pytest.approx(0.0)
+    assert algo._state.committed_on_percent == pytest.approx(0.0)
 
 
 def test_startup_bootstrap_forces_cycle_restart_once_when_cooldown_reaches_lower_target() -> None:
@@ -1324,7 +1324,7 @@ def test_invalid_temperature_data_rejects_cycle_and_disables_output() -> None:
     )
 
     diagnostics = algo.get_diagnostics()
-    assert algo.on_percent is None
+    assert algo._state.committed_on_percent is None
     assert algo.requested_on_percent is None
     assert diagnostics["last_runtime_blocker"] == "missing_temperature"
     assert diagnostics["debug"]["last_cycle_classification"] == "rejected"
@@ -1344,7 +1344,7 @@ def test_off_mode_forces_zero_output() -> None:
 
     diagnostics = algo.get_diagnostics()
     assert algo.requested_on_percent == pytest.approx(0.0)
-    assert algo.on_percent == pytest.approx(0.0)
+    assert algo._state.committed_on_percent == pytest.approx(0.0)
     assert diagnostics["last_runtime_blocker"] == "hvac_mode_incompatible"
     assert diagnostics["debug"]["last_cycle_classification"] == "rejected"
 
@@ -2905,7 +2905,7 @@ def test_deadtime_history_uses_realized_cycle_power(
     diagnostics = algo.get_diagnostics()
     assert recorded_powers == [pytest.approx(0.2)]
     assert diagnostics["debug"]["current_cycle_regime"] == "mixed"
-    assert algo.on_percent == pytest.approx(0.8)
+    assert algo._state.committed_on_percent == pytest.approx(0.8)
 
 
 def test_calculate_keeps_committed_power_separate_from_next_requested_power() -> None:
@@ -2930,7 +2930,7 @@ def test_calculate_keeps_committed_power_separate_from_next_requested_power() ->
     )
 
     diagnostics = algo.get_diagnostics()
-    assert algo.on_percent == pytest.approx(0.6)
+    assert algo._state.committed_on_percent == pytest.approx(0.6)
     assert algo.requested_on_percent == pytest.approx(1.0)
     assert diagnostics["current_cycle_percent"] == pytest.approx(0.6)
     assert diagnostics["next_cycle_percent"] == pytest.approx(1.0)
