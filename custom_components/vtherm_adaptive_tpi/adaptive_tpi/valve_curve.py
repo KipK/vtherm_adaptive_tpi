@@ -231,9 +231,9 @@ class TwoSlopeValveCurve:
         """Map linear model demand to valve position."""
         demand = clamp_unit(demand_unit) * 100.0
         p = self._params
-        if demand < p.min_valve:
+        if demand <= 0.0:
             return 0.0
-        if demand < p.knee_demand:
+        if demand <= p.knee_demand:
             valve = p.min_valve + (demand / p.knee_demand) * (
                 p.knee_valve - p.min_valve
             )
@@ -247,12 +247,7 @@ class TwoSlopeValveCurve:
         """Map valve position to equivalent linear model demand."""
         valve = clamp_unit(actuator_unit) * 100.0
         p = self._params
-        if valve <= 0.0:
-            return 0.0
-        first_reachable = p.min_valve + (p.min_valve / p.knee_demand) * (
-            p.knee_valve - p.min_valve
-        )
-        if valve < first_reachable:
+        if valve < p.min_valve:
             return 0.0
         if valve <= p.knee_valve:
             demand = (valve - p.min_valve) * p.knee_demand / (

@@ -110,9 +110,9 @@ def evaluate_two_slope_curve(
 ) -> float:
     """Evaluate the two-slope curve in percent units."""
     demand = clamp_percent(demand_percent)
-    if demand < min_valve:
+    if demand <= 0.0:
         return 0.0
-    if demand < knee_demand:
+    if demand <= knee_demand:
         return min_valve + (demand / knee_demand) * (knee_valve - min_valve)
     return knee_valve + ((demand - knee_demand) / (100.0 - knee_demand)) * (
         max_valve - knee_valve
@@ -176,7 +176,7 @@ def estimate_two_slope_update(
         return None
 
     base_min_valve = clamp_percent(
-        quantile(active_valves, 0.10),
+        current_min_valve,
         1.0,
         max(1.0, current_knee_valve - 1.0),
     )

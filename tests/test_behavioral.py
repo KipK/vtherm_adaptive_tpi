@@ -202,7 +202,8 @@ def test_identity_valve_curve_is_strictly_linear() -> None:
 def test_two_slope_valve_curve_round_trips_reachable_points() -> None:
     """Reachable valve positions invert back to the model demand."""
     curve = TwoSlopeValveCurve(VALVE_CURVE_DEFAULTS)
-    assert curve.apply(0.06) == pytest.approx(0.0)
+    assert curve.apply(0.0) == pytest.approx(0.0)
+    assert curve.apply(0.06) == pytest.approx(0.076)
     assert curve.apply(0.07) == pytest.approx(0.077)
     assert curve.apply(0.80) == pytest.approx(0.15)
     assert curve.apply(1.0) == pytest.approx(1.0)
