@@ -84,6 +84,7 @@ class StepIdentification:
     b_proxy: float | None
     cycle_index: int
     nd_minutes: float | None = None
+    transition: str = "on"
 
 
 @dataclass(slots=True)
@@ -97,6 +98,29 @@ class DeadtimeSearchResult:
     best_candidate: float | None
     second_best_candidate: float | None
     best_candidate_a: float | None
+    best_candidate_b: float | None
+    candidate_costs: dict[str, float]
+    lock_reason: str | None
+    nd_hat_on: float | None = None
+    nd_minutes_on: float | None = None
+    c_nd_on: float = 0.0
+    deadtime_on_locked: bool = False
+    nd_hat_off: float | None = None
+    nd_minutes_off: float | None = None
+    c_nd_off: float = 0.0
+    deadtime_off_locked: bool = False
+
+
+@dataclass(slots=True)
+class _AggregatedDeadtime:
+    """Aggregated deadtime estimate for one transition family."""
+
+    nd_hat: float
+    nd_minutes: float | None
+    confidence: float
+    locked: bool
+    best_candidate: float | None
+    second_best_candidate: float | None
     best_candidate_b: float | None
     candidate_costs: dict[str, float]
     lock_reason: str | None
@@ -133,6 +157,20 @@ def _per_hour(value_per_cycle: float, cycle_min: float) -> float:
 def _per_cycle(value_per_hour: float, cycle_min: float) -> float:
     """Convert a persisted per-hour estimate to a per-cycle runtime value."""
     return value_per_hour * (cycle_min / 60.0)
+
+
+def _minutes_for_cycles(value_cycles: float | None, cycle_min: float | None) -> float | None:
+    """Convert a cycle count to minutes when possible."""
+    if value_cycles is None or not _valid_cycle_min(cycle_min):
+        return None
+    return value_cycles * float(cycle_min)
+
+
+def _cycles_from_minutes(value_minutes: Any, cycle_min: float | None) -> float | None:
+    """Convert persisted minutes to cycles when possible."""
+    if value_minutes is None or not _valid_cycle_min(cycle_min):
+        return None
+    return float(value_minutes) / float(cycle_min)
 
 
 def _select_identification_for_nd_hat(
@@ -236,6 +274,7 @@ def _measure_rise_delay(
                 quality=quality,
                 b_proxy=b_proxy,
                 cycle_index=step_index,
+                transition="on",
             )
 
     return _RESPONSE_PENDING
@@ -268,8 +307,11 @@ class DeadtimeModel:
         """Initialize the deadtime identifier."""
         self._cycle_history: list[CycleHistoryEntry] = []
         self._identifications: deque[StepIdentification] = deque(maxlen=N_HIST)
+        self._identifications_off: deque[StepIdentification] = deque(maxlen=N_HIST)
         self._last_processed_step_index: int = -1
         self._pending_step_index: int | None = None
+        self._last_locked_on_result: _AggregatedDeadtime | None = None
+        self._last_locked_off_result: _AggregatedDeadtime | None = None
         self.nd_hat: float = 0.0
         self.nd_minutes: float | None = None
         self.confidence: float = 0.0
@@ -316,8 +358,11 @@ class DeadtimeModel:
         """Reset all state."""
         self._cycle_history.clear()
         self._identifications.clear()
+        self._identifications_off.clear()
         self._last_processed_step_index = -1
         self._pending_step_index = None
+        self._last_locked_on_result = None
+        self._last_locked_off_result = None
         self.nd_hat = 0.0
         self.nd_minutes = None
         self.confidence = 0.0
@@ -385,7 +430,10 @@ class DeadtimeModel:
 
     def record_identification(self, identification: StepIdentification) -> DeadtimeSearchResult:
         """Append one externally confirmed temporal identification."""
-        self._identifications.append(identification)
+        if identification.transition == "off":
+            self._identifications_off.append(identification)
+        elif identification.transition == "on":
+            self._identifications.append(identification)
         self.last_result = self._recompute_nd_hat()
         return self.last_result
 
@@ -423,29 +471,69 @@ class DeadtimeModel:
 
     def _recompute_nd_hat(self) -> DeadtimeSearchResult:
         """Derive nd_hat, confidence and lock state from stored identifications."""
-        if not self._identifications:
-            self.nd_hat = 0.0
-            self.nd_minutes = None
-            self.confidence = 0.0
-            self.locked = False
-            return DeadtimeSearchResult(
+        raw_on = self._aggregate_identifications(list(self._identifications))
+        raw_off = self._aggregate_identifications(list(self._identifications_off))
+
+        if raw_on.locked:
+            self._last_locked_on_result = raw_on
+        if raw_off.locked:
+            self._last_locked_off_result = raw_off
+
+        on = self._last_locked_on_result or raw_on
+        off = self._last_locked_off_result or raw_off
+
+        self.nd_hat = on.nd_hat
+        self.nd_minutes = on.nd_minutes
+        self.confidence = on.confidence
+        self.locked = on.locked
+
+        candidate_costs = dict(on.candidate_costs)
+        candidate_costs.update({f"off:{k}": v for k, v in off.candidate_costs.items()})
+
+        return DeadtimeSearchResult(
+            nd_hat=on.nd_hat,
+            nd_minutes=on.nd_minutes,
+            c_nd=on.confidence,
+            locked=on.locked,
+            best_candidate=on.best_candidate,
+            second_best_candidate=on.second_best_candidate,
+            best_candidate_a=None,
+            best_candidate_b=on.best_candidate_b,
+            candidate_costs=candidate_costs,
+            lock_reason=on.lock_reason,
+            nd_hat_on=on.nd_hat,
+            nd_minutes_on=on.nd_minutes,
+            c_nd_on=on.confidence,
+            deadtime_on_locked=on.locked,
+            nd_hat_off=off.nd_hat,
+            nd_minutes_off=off.nd_minutes,
+            c_nd_off=off.confidence,
+            deadtime_off_locked=off.locked,
+        )
+
+    def _aggregate_identifications(
+        self,
+        identifications: list[StepIdentification],
+    ) -> _AggregatedDeadtime:
+        """Aggregate one transition family without mutating model state."""
+        if not identifications:
+            return _AggregatedDeadtime(
                 nd_hat=0.0,
                 nd_minutes=None,
-                c_nd=0.0,
+                confidence=0.0,
                 locked=False,
                 best_candidate=None,
                 second_best_candidate=None,
-                best_candidate_a=None,
                 best_candidate_b=None,
                 candidate_costs={},
                 lock_reason="deadtime_insufficient_identifications",
             )
 
-        nd_values = [ident.nd_cycles for ident in self._identifications]
-        qualities = [ident.quality for ident in self._identifications]
+        nd_values = [ident.nd_cycles for ident in identifications]
+        qualities = [ident.quality for ident in identifications]
         nd_hat = _weighted_median(nd_values, qualities)
         selected_identification = _select_identification_for_nd_hat(
-            list(self._identifications),
+            identifications,
             nd_hat,
         )
         nd_minutes = (
@@ -475,28 +563,23 @@ class DeadtimeModel:
             lock_reason = "deadtime_confidence_low"
 
         locked = lock_reason is None
-        self.nd_hat = nd_hat
-        self.nd_minutes = nd_minutes
-        self.confidence = confidence
-        self.locked = locked
 
         candidate_costs = {
-            str(i): ident.quality for i, ident in enumerate(self._identifications)
+            str(i): ident.quality for i, ident in enumerate(identifications)
         }
         sorted_by_quality = sorted(
-            self._identifications, key=lambda x: x.quality, reverse=True
+            identifications, key=lambda x: x.quality, reverse=True
         )
         best = sorted_by_quality[0]
         second = sorted_by_quality[1] if len(sorted_by_quality) > 1 else None
 
-        return DeadtimeSearchResult(
+        return _AggregatedDeadtime(
             nd_hat=nd_hat,
             nd_minutes=nd_minutes,
-            c_nd=confidence,
+            confidence=confidence,
             locked=locked,
             best_candidate=best.nd_cycles,
             second_best_candidate=second.nd_cycles if second else None,
-            best_candidate_a=None,
             best_candidate_b=best.b_proxy,
             candidate_costs=candidate_costs,
             lock_reason=lock_reason,
@@ -518,17 +601,28 @@ class DeadtimeModel:
 
     def to_persisted_dict(self, *, cycle_min: float | None = None) -> dict[str, Any]:
         """Serialize identified deadtimes for warm restarts."""
-        return {
+        data: dict[str, Any] = {
             "persistence_units": "time_canonical",
             "identifications": [
                 self._identification_to_persisted_dict(
                     ident,
                     cycle_min=cycle_min,
                 )
-                for ident in self._identifications
+                for ident in (*self._identifications, *self._identifications_off)
             ],
             "last_processed_step_index": self._last_processed_step_index,
         }
+        if self._last_locked_on_result is not None:
+            data["locked_on_result"] = self._aggregate_to_persisted_dict(
+                self._last_locked_on_result,
+                cycle_min=cycle_min,
+            )
+        if self._last_locked_off_result is not None:
+            data["locked_off_result"] = self._aggregate_to_persisted_dict(
+                self._last_locked_off_result,
+                cycle_min=cycle_min,
+            )
+        return data
 
     def load_persisted_dict(
         self,
@@ -554,17 +648,23 @@ class DeadtimeModel:
                     nd_minutes = float(raw["nd_minutes"])
                     nd_cycles = nd_minutes / float(cycle_min)
                     b_proxy = None
+                    transition = str(raw.get("transition", "on"))
+                    if transition not in ("on", "off"):
+                        continue
                     if b_per_hour_raw is not None:
                         b_proxy = _per_cycle(float(b_per_hour_raw), float(cycle_min))
-                    self._identifications.append(
-                        StepIdentification(
-                            nd_cycles=nd_cycles,
-                            nd_minutes=nd_minutes,
-                            quality=float(raw["quality"]),
-                            b_proxy=b_proxy,
-                            cycle_index=int(raw.get("cycle_index", 0)),
-                        )
+                    identification = StepIdentification(
+                        nd_cycles=nd_cycles,
+                        nd_minutes=nd_minutes,
+                        quality=float(raw["quality"]),
+                        b_proxy=b_proxy,
+                        cycle_index=int(raw.get("cycle_index", 0)),
+                        transition=transition,
                     )
+                    if transition == "off":
+                        self._identifications_off.append(identification)
+                    else:
+                        self._identifications.append(identification)
                 except (KeyError, TypeError, ValueError):
                     continue
 
@@ -572,10 +672,105 @@ class DeadtimeModel:
         if isinstance(lp, int):
             self._last_processed_step_index = lp
 
-        if self._identifications:
+        self._last_locked_on_result = self._aggregate_from_persisted_dict(
+            data.get("locked_on_result"),
+            cycle_min=cycle_min,
+        )
+        self._last_locked_off_result = self._aggregate_from_persisted_dict(
+            data.get("locked_off_result"),
+            cycle_min=cycle_min,
+        )
+
+        if self._identifications or self._identifications_off:
             self.last_result = self._recompute_nd_hat()
             return True
         return False
+
+    @staticmethod
+    def _aggregate_to_persisted_dict(
+        aggregate: _AggregatedDeadtime,
+        *,
+        cycle_min: float | None,
+    ) -> dict[str, Any]:
+        """Serialize one locked aggregate in time-canonical units."""
+        nd_minutes = aggregate.nd_minutes
+        if nd_minutes is None and _valid_cycle_min(cycle_min):
+            nd_minutes = aggregate.nd_hat * float(cycle_min)
+        best_candidate_minutes = _minutes_for_cycles(
+            aggregate.best_candidate,
+            cycle_min,
+        )
+        second_best_candidate_minutes = _minutes_for_cycles(
+            aggregate.second_best_candidate,
+            cycle_min,
+        )
+
+        data: dict[str, Any] = {
+            "confidence": aggregate.confidence,
+            "locked": aggregate.locked,
+            "candidate_costs": dict(aggregate.candidate_costs),
+            "lock_reason": aggregate.lock_reason,
+        }
+        if nd_minutes is not None:
+            data["nd_minutes"] = nd_minutes
+        if best_candidate_minutes is not None:
+            data["best_candidate_minutes"] = best_candidate_minutes
+        if second_best_candidate_minutes is not None:
+            data["second_best_candidate_minutes"] = second_best_candidate_minutes
+        if aggregate.best_candidate_b is not None and _valid_cycle_min(cycle_min):
+            data["best_candidate_b_per_hour"] = _per_hour(
+                aggregate.best_candidate_b,
+                float(cycle_min),
+            )
+        return data
+
+    @staticmethod
+    def _aggregate_from_persisted_dict(
+        raw: Any,
+        *,
+        cycle_min: float | None,
+    ) -> _AggregatedDeadtime | None:
+        """Restore one locked aggregate from time-canonical persistence."""
+        if not isinstance(raw, Mapping) or not _valid_cycle_min(cycle_min):
+            return None
+        try:
+            nd_minutes = float(raw["nd_minutes"])
+            candidate_costs = raw.get("candidate_costs")
+            if not isinstance(candidate_costs, Mapping):
+                candidate_costs = {}
+            cleaned_costs: dict[str, float] = {}
+            for key, value in candidate_costs.items():
+                if not isinstance(key, str):
+                    continue
+                cleaned_costs[key] = float(value)
+            lock_reason = raw.get("lock_reason")
+            best_candidate = _cycles_from_minutes(
+                raw.get("best_candidate_minutes"),
+                cycle_min,
+            )
+            second_best_candidate = _cycles_from_minutes(
+                raw.get("second_best_candidate_minutes"),
+                cycle_min,
+            )
+            best_candidate_b = None
+            if raw.get("best_candidate_b_per_hour") is not None:
+                best_candidate_b = _per_cycle(
+                    float(raw["best_candidate_b_per_hour"]),
+                    float(cycle_min),
+                )
+            return _AggregatedDeadtime(
+                nd_hat=nd_minutes / float(cycle_min),
+                nd_minutes=nd_minutes,
+                confidence=float(raw["confidence"]),
+                locked=bool(raw.get("locked", True)),
+                best_candidate=best_candidate,
+                second_best_candidate=second_best_candidate,
+                best_candidate_b=best_candidate_b,
+                candidate_costs=cleaned_costs,
+                lock_reason=lock_reason if isinstance(lock_reason, str) else None,
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
 
     @staticmethod
     def _identification_to_persisted_dict(
@@ -591,6 +786,7 @@ class DeadtimeModel:
         data: dict[str, Any] = {
             "quality": identification.quality,
             "cycle_index": identification.cycle_index,
+            "transition": identification.transition,
         }
         if nd_minutes is not None:
             data["nd_minutes"] = nd_minutes

@@ -57,6 +57,14 @@ Interpretation:
 - `deadtime_cycles`
 - `deadtime_minutes`
 - `deadtime_confidence`
+- `deadtime_on_cycles`
+- `deadtime_on_minutes`
+- `deadtime_on_confidence`
+- `deadtime_on_locked`
+- `deadtime_off_cycles`
+- `deadtime_off_minutes`
+- `deadtime_off_confidence`
+- `deadtime_off_locked`
 
 Interpretation:
 
@@ -64,6 +72,9 @@ Interpretation:
 - `deadtime_minutes` is the measured deadtime in minutes attached to the selected `deadtime_cycles` estimate
 - when no measured minute value is available yet, `deadtime_minutes` falls back to the normalized value built from `deadtime_cycles` and the last accepted cycle duration
 - `deadtime_confidence` is the confidence in that estimate, in `[0, 1]`
+- the historical deadtime fields are aliases of the ON transition, measured after OFF -> ON
+- `deadtime_off_*` describes the ON -> OFF transition used by OFF learning-window blackout when available
+- no OFF value is inferred from legacy single-deadtime snapshots
 
 ### Heating and cooling rates
 
@@ -111,12 +122,14 @@ Possible `startup_sequence_stage` values:
 - `active_to_target`
 - `passive_drift_phase`
 - `reactivation_to_target`
+- `reactivation_to_upper_target`
+- `return_to_target`
 - `completed`
-- `abandoned`
 
 Interpretation:
 
 - `startup_sequence_active = true` means startup bootstrap is currently overriding the nominal command
+- `startup_sequence_max_attempts = 0` means the startup sequence retries until ON and OFF deadtimes are both acquired
 - `current_cycle_percent` is the power committed for the currently engaged cycle
 - `next_cycle_percent` is the requested power prepared for the next scheduler cycle
 
@@ -173,6 +186,14 @@ This mapping keeps the implementation-oriented names used by the algorithm.
   - `deadtime_identification_qualities`
   - `deadtime_b_proxy`
   - `deadtime_locked`
+  - `deadtime_on_cycles`
+  - `deadtime_on_minutes`
+  - `deadtime_on_confidence`
+  - `deadtime_on_locked`
+  - `deadtime_off_cycles`
+  - `deadtime_off_minutes`
+  - `deadtime_off_confidence`
+  - `deadtime_off_locked`
   - `deadtime_pending_step`
   - `deadtime_best_candidate`
   - `deadtime_second_best_candidate`

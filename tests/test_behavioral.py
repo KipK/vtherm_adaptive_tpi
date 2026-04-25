@@ -36,6 +36,9 @@ from custom_components.vtherm_adaptive_tpi.handler import (
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.state import (
     PERSISTENCE_SCHEMA_VERSION,
 )
+from custom_components.vtherm_adaptive_tpi.adaptive_tpi.startup_bootstrap import (
+    StartupBootstrapController,
+)
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.valve_curve import (
     IdentityValveCurve,
     TwoSlopeValveCurve,
@@ -343,6 +346,8 @@ def test_valve_mode_applies_curve_to_requested_command() -> None:
         actuator_mode=ACTUATOR_MODE_VALVE,
     )
     algo._state.deadtime_identification_count = 1
+    algo._state.deadtime_on_locked = True
+    algo._state.deadtime_off_locked = True
     algo.calculate(
         target_temp=20.0,
         current_temp=19.5,
@@ -457,7 +462,7 @@ def test_startup_with_no_history_keeps_bootstrap_defaults() -> None:
     assert diagnostics["startup_sequence_active"] is False
     assert diagnostics["startup_sequence_stage"] == "idle"
     assert diagnostics["startup_sequence_attempt"] == 0
-    assert diagnostics["startup_sequence_max_attempts"] == 2
+    assert diagnostics["startup_sequence_max_attempts"] == 0
     assert diagnostics["control_rate_per_hour"] is None
     assert diagnostics["drift_rate_per_hour"] is None
     assert diagnostics["thermal_time_constant_hours"] is None
@@ -547,9 +552,21 @@ def test_startup_bootstrap_cools_down_immediately_when_temperature_is_at_setpoin
     assert diagnostics["startup_sequence_attempt"] == 1
 
 
-def test_startup_bootstrap_retries_a_second_deadtime_cycle_when_first_one_fails() -> None:
-    """Startup bootstrap should schedule a second OFF->ON attempt when no deadtime was found."""
+def test_startup_bootstrap_retries_deadtime_cycle_when_one_family_is_missing() -> None:
+    """Startup bootstrap should repeat the full cycle while a deadtime family is missing."""
     algo = AdaptiveTPIAlgorithm(name="test-startup-bootstrap-retry")
+
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=19.7,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    diagnostics = algo.get_diagnostics()
+    assert algo.requested_on_percent == pytest.approx(0.0)
+    assert algo.on_percent == pytest.approx(0.0)
+    assert diagnostics["startup_sequence_stage"] == "passive_drift_phase"
 
     algo.calculate(
         target_temp=20.0,
@@ -561,29 +578,19 @@ def test_startup_bootstrap_retries_a_second_deadtime_cycle_when_first_one_fails(
     diagnostics = algo.get_diagnostics()
     assert algo.requested_on_percent == pytest.approx(1.0)
     assert algo.on_percent == pytest.approx(0.0)
-    assert diagnostics["startup_sequence_stage"] == "active_to_target"
+    assert diagnostics["startup_sequence_stage"] == "reactivation_to_upper_target"
 
     algo.calculate(
         target_temp=20.0,
-        current_temp=20.0,
-        ext_current_temp=20.0,
-        slope=None,
-        hvac_mode="heat",
-    )
-    assert algo.requested_on_percent == pytest.approx(0.0)
-    assert algo.on_percent == pytest.approx(0.0)
-
-    algo.calculate(
-        target_temp=20.0,
-        current_temp=19.7,
+        current_temp=20.3,
         ext_current_temp=20.0,
         slope=None,
         hvac_mode="heat",
     )
     diagnostics = algo.get_diagnostics()
-    assert algo.requested_on_percent == pytest.approx(1.0)
+    assert algo.requested_on_percent == pytest.approx(0.0)
     assert algo.on_percent == pytest.approx(0.0)
-    assert diagnostics["startup_sequence_stage"] == "reactivation_to_target"
+    assert diagnostics["startup_sequence_stage"] == "return_to_target"
 
     algo.calculate(
         target_temp=20.0,
@@ -599,12 +606,24 @@ def test_startup_bootstrap_retries_a_second_deadtime_cycle_when_first_one_fails(
     assert diagnostics["startup_sequence_active"] is True
     assert diagnostics["startup_sequence_stage"] == "passive_drift_phase"
     assert diagnostics["startup_sequence_attempt"] == 2
-    assert diagnostics["startup_sequence_completion_reason"] is None
+    assert diagnostics["startup_sequence_completion_reason"] == "deadtime_on_off_retry"
 
 
-def test_startup_bootstrap_retries_a_second_deadtime_cycle_in_cool_mode() -> None:
-    """Startup bootstrap should mirror the retry sequence when cooling is active."""
+def test_startup_bootstrap_retries_deadtime_cycle_in_cool_mode() -> None:
+    """Startup bootstrap should mirror the ON/OFF retry sequence when cooling is active."""
     algo = AdaptiveTPIAlgorithm(name="test-startup-bootstrap-retry-cool")
+
+    algo.calculate(
+        target_temp=25.0,
+        current_temp=25.3,
+        ext_current_temp=30.0,
+        slope=None,
+        hvac_mode="cool",
+    )
+    diagnostics = algo.get_diagnostics()
+    assert algo.requested_on_percent == pytest.approx(0.0)
+    assert algo.on_percent == pytest.approx(0.0)
+    assert diagnostics["startup_sequence_stage"] == "passive_drift_phase"
 
     algo.calculate(
         target_temp=25.0,
@@ -616,29 +635,19 @@ def test_startup_bootstrap_retries_a_second_deadtime_cycle_in_cool_mode() -> Non
     diagnostics = algo.get_diagnostics()
     assert algo.requested_on_percent == pytest.approx(1.0)
     assert algo.on_percent == pytest.approx(0.0)
-    assert diagnostics["startup_sequence_stage"] == "active_to_target"
+    assert diagnostics["startup_sequence_stage"] == "reactivation_to_upper_target"
 
     algo.calculate(
         target_temp=25.0,
-        current_temp=25.0,
-        ext_current_temp=30.0,
-        slope=None,
-        hvac_mode="cool",
-    )
-    assert algo.requested_on_percent == pytest.approx(0.0)
-    assert algo.on_percent == pytest.approx(0.0)
-
-    algo.calculate(
-        target_temp=25.0,
-        current_temp=25.3,
+        current_temp=24.7,
         ext_current_temp=30.0,
         slope=None,
         hvac_mode="cool",
     )
     diagnostics = algo.get_diagnostics()
-    assert algo.requested_on_percent == pytest.approx(1.0)
+    assert algo.requested_on_percent == pytest.approx(0.0)
     assert algo.on_percent == pytest.approx(0.0)
-    assert diagnostics["startup_sequence_stage"] == "reactivation_to_target"
+    assert diagnostics["startup_sequence_stage"] == "return_to_target"
 
     algo.calculate(
         target_temp=25.0,
@@ -654,11 +663,11 @@ def test_startup_bootstrap_retries_a_second_deadtime_cycle_in_cool_mode() -> Non
     assert diagnostics["startup_sequence_active"] is True
     assert diagnostics["startup_sequence_stage"] == "passive_drift_phase"
     assert diagnostics["startup_sequence_attempt"] == 2
-    assert diagnostics["startup_sequence_completion_reason"] is None
+    assert diagnostics["startup_sequence_completion_reason"] == "deadtime_on_off_retry"
 
 
-def test_startup_bootstrap_completes_after_first_identified_deadtime_cycle() -> None:
-    """Startup bootstrap should stop retrying once one deadtime identification exists."""
+def test_startup_bootstrap_completes_after_on_and_off_deadtime_cycle() -> None:
+    """Startup bootstrap should stop retrying once both deadtime families are acquired."""
     algo = AdaptiveTPIAlgorithm(name="test-startup-bootstrap-complete")
 
     algo.calculate(
@@ -670,15 +679,17 @@ def test_startup_bootstrap_completes_after_first_identified_deadtime_cycle() -> 
     )
     algo.calculate(
         target_temp=20.0,
-        current_temp=19.7,
+        current_temp=19.5,
         ext_current_temp=20.0,
         slope=None,
         hvac_mode="heat",
     )
     algo._state.deadtime_identification_count = 1
+    algo._state.deadtime_on_locked = True
+    algo._state.deadtime_off_locked = True
     algo.calculate(
         target_temp=20.0,
-        current_temp=20.0,
+        current_temp=20.3,
         ext_current_temp=20.0,
         slope=None,
         hvac_mode="heat",
@@ -687,13 +698,13 @@ def test_startup_bootstrap_completes_after_first_identified_deadtime_cycle() -> 
     diagnostics = algo.get_diagnostics()
     assert diagnostics["startup_sequence_active"] is False
     assert diagnostics["startup_sequence_stage"] == "completed"
-    assert diagnostics["startup_sequence_completion_reason"] == "deadtime_identified"
+    assert diagnostics["startup_sequence_completion_reason"] == "deadtime_on_off_identified"
     assert algo.requested_on_percent == pytest.approx(0.0)
     assert algo.on_percent == pytest.approx(0.0)
 
 
-def test_startup_bootstrap_exits_if_deadtime_arrives_after_reheat_cycle_closed() -> None:
-    """A delayed deadtime identification must stop bootstrap even if it already fell back to cooldown."""
+def test_startup_bootstrap_exits_if_both_deadtimes_arrive_after_reheat_cycle_closed() -> None:
+    """Delayed ON/OFF deadtime locks must stop bootstrap even after it fell back to cooldown."""
     algo = AdaptiveTPIAlgorithm(name="test-startup-bootstrap-late-deadtime")
 
     algo.calculate(
@@ -705,11 +716,26 @@ def test_startup_bootstrap_exits_if_deadtime_arrives_after_reheat_cycle_closed()
     )
     algo.calculate(
         target_temp=20.0,
-        current_temp=19.7,
+        current_temp=19.5,
         ext_current_temp=20.0,
         slope=None,
         hvac_mode="heat",
     )
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=20.3,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+
+    diagnostics = algo.get_diagnostics()
+    assert diagnostics["startup_sequence_stage"] == "return_to_target"
+    assert diagnostics["startup_sequence_attempt"] == 1
+
+    algo._state.deadtime_identification_count = 2
+    algo._state.deadtime_on_locked = True
+    algo._state.deadtime_off_locked = True
     algo.calculate(
         target_temp=20.0,
         current_temp=20.0,
@@ -719,28 +745,15 @@ def test_startup_bootstrap_exits_if_deadtime_arrives_after_reheat_cycle_closed()
     )
 
     diagnostics = algo.get_diagnostics()
-    assert diagnostics["startup_sequence_stage"] == "passive_drift_phase"
-    assert diagnostics["startup_sequence_attempt"] == 2
-
-    algo._state.deadtime_identification_count = 1
-    algo.calculate(
-        target_temp=20.0,
-        current_temp=20.5,
-        ext_current_temp=20.0,
-        slope=None,
-        hvac_mode="heat",
-    )
-
-    diagnostics = algo.get_diagnostics()
     assert diagnostics["startup_sequence_active"] is False
     assert diagnostics["startup_sequence_stage"] == "completed"
-    assert diagnostics["startup_sequence_completion_reason"] == "deadtime_identified"
+    assert diagnostics["startup_sequence_completion_reason"] == "deadtime_on_off_identified"
     assert algo.requested_on_percent == pytest.approx(0.0)
     assert algo.on_percent == pytest.approx(0.0)
 
 
-def test_startup_bootstrap_abandons_after_second_failed_deadtime_cycle() -> None:
-    """Startup bootstrap should fall back to normal control after two failed attempts."""
+def test_startup_bootstrap_keeps_retrying_without_both_deadtimes() -> None:
+    """Startup bootstrap should keep cycling instead of silently degrading."""
     algo = AdaptiveTPIAlgorithm(name="test-startup-bootstrap-abandon")
 
     algo.calculate(
@@ -752,7 +765,14 @@ def test_startup_bootstrap_abandons_after_second_failed_deadtime_cycle() -> None
     )
     algo.calculate(
         target_temp=20.0,
-        current_temp=19.7,
+        current_temp=19.5,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=20.3,
         ext_current_temp=20.0,
         slope=None,
         hvac_mode="heat",
@@ -766,27 +786,17 @@ def test_startup_bootstrap_abandons_after_second_failed_deadtime_cycle() -> None
     )
     algo.calculate(
         target_temp=20.0,
-        current_temp=19.7,
-        ext_current_temp=20.0,
-        slope=None,
-        hvac_mode="heat",
-    )
-    algo.calculate(
-        target_temp=20.0,
-        current_temp=20.0,
+        current_temp=19.5,
         ext_current_temp=20.0,
         slope=None,
         hvac_mode="heat",
     )
 
     diagnostics = algo.get_diagnostics()
-    assert diagnostics["startup_sequence_active"] is False
-    assert diagnostics["startup_sequence_stage"] == "abandoned"
-    assert (
-        diagnostics["startup_sequence_completion_reason"]
-        == "deadtime_not_identified_after_retries"
-    )
-    assert algo.requested_on_percent == pytest.approx(0.0)
+    assert diagnostics["startup_sequence_active"] is True
+    assert diagnostics["startup_sequence_stage"] == "reactivation_to_upper_target"
+    assert diagnostics["startup_sequence_completion_reason"] == "deadtime_on_off_retry"
+    assert algo.requested_on_percent == pytest.approx(1.0)
     assert algo.on_percent == pytest.approx(0.0)
 
 
@@ -813,7 +823,7 @@ def test_startup_bootstrap_forces_cycle_restart_once_when_cooldown_reaches_lower
     assert (
         algo.should_force_bootstrap_cycle_restart(
             target_temp=20.0,
-            current_temp=19.7,
+            current_temp=19.5,
             hvac_mode="heat",
         )
         is True
@@ -821,7 +831,7 @@ def test_startup_bootstrap_forces_cycle_restart_once_when_cooldown_reaches_lower
     assert (
         algo.should_force_bootstrap_cycle_restart(
             target_temp=20.0,
-            current_temp=19.6,
+            current_temp=19.4,
             hvac_mode="heat",
         )
         is False
@@ -841,7 +851,7 @@ def test_startup_bootstrap_forces_cycle_restart_once_when_reheat_reaches_target(
     )
     algo.calculate(
         target_temp=20.0,
-        current_temp=19.7,
+        current_temp=19.5,
         ext_current_temp=20.0,
         slope=None,
         hvac_mode="heat",
@@ -858,18 +868,18 @@ def test_startup_bootstrap_forces_cycle_restart_once_when_reheat_reaches_target(
     assert (
         algo.should_force_bootstrap_cycle_restart(
             target_temp=20.0,
-            current_temp=20.0,
-            hvac_mode="heat",
-        )
-        is True
-    )
-    assert (
-        algo.should_force_bootstrap_cycle_restart(
-            target_temp=20.0,
             current_temp=20.2,
             hvac_mode="heat",
         )
         is False
+    )
+    assert (
+        algo.should_force_bootstrap_cycle_restart(
+            target_temp=20.0,
+            current_temp=20.3,
+            hvac_mode="heat",
+        )
+        is True
     )
 
 
@@ -886,7 +896,7 @@ def test_startup_bootstrap_detects_mid_cycle_command_flip_after_calculation() ->
     )
     algo.calculate(
         target_temp=20.0,
-        current_temp=19.7,
+        current_temp=19.5,
         ext_current_temp=20.0,
         slope=None,
         hvac_mode="heat",
@@ -896,7 +906,7 @@ def test_startup_bootstrap_detects_mid_cycle_command_flip_after_calculation() ->
 
     algo.calculate(
         target_temp=20.0,
-        current_temp=20.0,
+        current_temp=20.3,
         ext_current_temp=20.0,
         slope=None,
         hvac_mode="heat",
@@ -927,7 +937,7 @@ def test_startup_bootstrap_detects_mid_cycle_command_flip_after_thermostat_recal
     )
     algo.calculate(
         target_temp=20.0,
-        current_temp=19.7,
+        current_temp=19.5,
         ext_current_temp=20.0,
         slope=None,
         hvac_mode="heat",
@@ -936,7 +946,7 @@ def test_startup_bootstrap_detects_mid_cycle_command_flip_after_thermostat_recal
 
     algo.calculate(
         target_temp=20.0,
-        current_temp=20.0,
+        current_temp=20.3,
         ext_current_temp=20.0,
         slope=None,
         hvac_mode="heat",
@@ -1619,6 +1629,37 @@ def test_deadtime_model_locks_on_single_clean_identification() -> None:
     assert result.c_nd >= CONFIDENCE_LOCK_THRESHOLD
 
 
+def test_deadtime_model_keeps_on_lock_after_incoherent_identification() -> None:
+    """A locked ON deadtime must remain usable after a later inconsistent sample."""
+    model = DeadtimeModel()
+    model.record_identification(
+        StepIdentification(
+            nd_cycles=2.0,
+            nd_minutes=10.0,
+            quality=0.9,
+            b_proxy=None,
+            cycle_index=0,
+            transition="on",
+        )
+    )
+
+    result = model.record_identification(
+        StepIdentification(
+            nd_cycles=8.0,
+            nd_minutes=40.0,
+            quality=0.9,
+            b_proxy=None,
+            cycle_index=1,
+            transition="on",
+        )
+    )
+
+    assert result.locked is True
+    assert result.deadtime_on_locked is True
+    assert result.nd_hat == pytest.approx(2.0)
+    assert result.nd_minutes == pytest.approx(10.0)
+
+
 def test_deadtime_model_no_lock_when_single_identification_quality_too_low() -> None:
     """A single identification with quality below threshold must not lock."""
     model = DeadtimeModel()
@@ -1687,6 +1728,104 @@ def test_deadtime_persistence_roundtrip() -> None:
     assert model2.nd_minutes == pytest.approx(11.7)
 
 
+def test_deadtime_persistence_roundtrip_keeps_on_off_families() -> None:
+    """ON and OFF deadtime identifications must persist as separate families."""
+    model = DeadtimeModel()
+    model.record_identification(
+        StepIdentification(
+            nd_cycles=2.0,
+            nd_minutes=10.0,
+            quality=0.9,
+            b_proxy=0.04,
+            cycle_index=10,
+            transition="on",
+        )
+    )
+    model.record_identification(
+        StepIdentification(
+            nd_cycles=3.0,
+            nd_minutes=15.0,
+            quality=0.8,
+            b_proxy=None,
+            cycle_index=11,
+            transition="off",
+        )
+    )
+
+    saved = model.to_persisted_dict(cycle_min=5.0)
+    model2 = DeadtimeModel()
+    assert model2.load_persisted_dict(saved, cycle_min=5.0) is True
+    result = model2.last_result
+
+    assert len(model2._identifications) == 1
+    assert len(model2._identifications_off) == 1
+    assert result.deadtime_on_locked is True
+    assert result.deadtime_off_locked is True
+    assert result.nd_hat_on == pytest.approx(2.0)
+    assert result.nd_minutes_on == pytest.approx(10.0)
+    assert result.nd_hat_off == pytest.approx(3.0)
+    assert result.nd_minutes_off == pytest.approx(15.0)
+
+
+def test_deadtime_persistence_keeps_locked_snapshot_after_incoherent_sample() -> None:
+    """A persisted locked snapshot must survive incoherent later samples."""
+    model = DeadtimeModel()
+    model.record_identification(
+        StepIdentification(
+            nd_cycles=2.0,
+            nd_minutes=10.0,
+            quality=0.9,
+            b_proxy=0.04,
+            cycle_index=1,
+            transition="on",
+        )
+    )
+    model.record_identification(
+        StepIdentification(
+            nd_cycles=8.0,
+            nd_minutes=40.0,
+            quality=0.9,
+            b_proxy=None,
+            cycle_index=2,
+            transition="on",
+        )
+    )
+    assert model.last_result.locked is True
+    assert model.last_result.nd_hat == pytest.approx(2.0)
+
+    saved = model.to_persisted_dict(cycle_min=5.0)
+    restored = DeadtimeModel()
+    assert restored.load_persisted_dict(saved, cycle_min=5.0) is True
+
+    assert restored.last_result.locked is True
+    assert restored.last_result.deadtime_on_locked is True
+    assert restored.last_result.nd_hat == pytest.approx(2.0)
+    assert restored.last_result.nd_minutes == pytest.approx(10.0)
+
+
+def test_deadtime_persistence_without_transition_restores_on_only() -> None:
+    """Legacy identifications without transition belong to the ON family only."""
+    model = DeadtimeModel()
+    model.load_persisted_dict(
+        {
+            "persistence_units": "time_canonical",
+            "identifications": [
+                {
+                    "nd_minutes": 10.0,
+                    "quality": 0.9,
+                    "cycle_index": 1,
+                }
+            ],
+        },
+        cycle_min=5.0,
+    )
+
+    assert len(model._identifications) == 1
+    assert len(model._identifications_off) == 0
+    assert model.last_result.deadtime_on_locked is True
+    assert model.last_result.deadtime_off_locked is False
+
+
 def test_deadtime_old_format_silently_ignored() -> None:
     """A persisted dict with the old cycle_history key must be silently discarded."""
     old_format = {
@@ -1700,6 +1839,66 @@ def test_deadtime_old_format_silently_ignored() -> None:
     assert len(model._identifications) == 0
     assert model.nd_hat == pytest.approx(0.0)
     assert model.locked is False
+
+
+def test_startup_bootstrap_waits_for_on_and_off_deadtime_locks() -> None:
+    """Startup bootstrap should complete only after both transition families lock."""
+    bootstrap = StartupBootstrapController()
+
+    first = bootstrap.evaluate(
+        target_temp=20.0,
+        current_temp=20.0,
+        deadtime_identification_count=0,
+        deadtime_on_locked=False,
+        deadtime_off_locked=False,
+        heating_enabled=True,
+    )
+    assert first.active is True
+    assert first.command_on_percent == pytest.approx(0.0)
+
+    reheat = bootstrap.evaluate(
+        target_temp=20.0,
+        current_temp=19.5,
+        deadtime_identification_count=1,
+        deadtime_on_locked=True,
+        deadtime_off_locked=False,
+        heating_enabled=True,
+    )
+    assert reheat.active is True
+    assert reheat.command_on_percent == pytest.approx(1.0)
+
+    final_cooldown = bootstrap.evaluate(
+        target_temp=20.0,
+        current_temp=20.3,
+        deadtime_identification_count=1,
+        deadtime_on_locked=True,
+        deadtime_off_locked=False,
+        heating_enabled=True,
+    )
+    assert final_cooldown.active is True
+    assert final_cooldown.command_on_percent == pytest.approx(0.0)
+
+    retry = bootstrap.evaluate(
+        target_temp=20.0,
+        current_temp=20.0,
+        deadtime_identification_count=1,
+        deadtime_on_locked=True,
+        deadtime_off_locked=False,
+        heating_enabled=True,
+    )
+    assert retry.active is True
+    assert retry.completion_reason == "deadtime_on_off_retry"
+
+    completed = bootstrap.evaluate(
+        target_temp=20.0,
+        current_temp=20.0,
+        deadtime_identification_count=2,
+        deadtime_on_locked=True,
+        deadtime_off_locked=True,
+        heating_enabled=True,
+    )
+    assert completed.active is False
+    assert completed.completion_reason == "deadtime_on_off_identified"
 
 
 def test_estimator_updates_stay_bounded_under_extreme_samples() -> None:
@@ -3089,6 +3288,54 @@ def test_warm_start_restores_deadtime_model_and_candidate_costs() -> None:
     assert diagnostics["debug"]["deadtime_best_candidate"] == pytest.approx(
         result.best_candidate
     )
+
+
+def test_warm_start_after_long_gap_keeps_locked_deadtime() -> None:
+    """A long warm-start gap must not clear a previously locked deadtime."""
+    now = datetime(2026, 4, 24, tzinfo=timezone.utc)
+    algo = AdaptiveTPIAlgorithm(name="test-long-warm-start", debug_mode=True)
+    algo._utc_now = lambda: now
+    algo._deadtime_model.record_identification(
+        StepIdentification(
+            nd_cycles=2.0,
+            nd_minutes=10.0,
+            quality=0.9,
+            b_proxy=0.04,
+            cycle_index=1,
+            transition="on",
+        )
+    )
+    result = algo._deadtime_model.last_result
+    algo._state.nd_hat = result.nd_hat
+    algo._state.deadtime_minutes = result.nd_minutes
+    algo._state.c_nd = result.c_nd
+    algo._state.deadtime_locked = result.locked
+    algo._state.deadtime_on_cycles = result.nd_hat_on
+    algo._state.deadtime_on_minutes = result.nd_minutes_on
+    algo._state.deadtime_on_confidence = result.c_nd_on
+    algo._state.deadtime_on_locked = result.deadtime_on_locked
+    algo._state.bootstrap_phase = PHASE_C
+    algo._state.a_hat = 0.2
+    algo._state.b_hat = 0.03
+    algo._state.c_a = 0.8
+    algo._state.c_b = 0.8
+
+    saved = algo.save_state(cycle_min=5.0)
+    restored = AdaptiveTPIAlgorithm(name="test-long-warm-start-restored", debug_mode=True)
+    restored._utc_now = lambda: now
+    restored.load_state(
+        saved,
+        current_cycle_min=5.0,
+        persisted_cycle_min=5.0,
+        saved_at=(now - timedelta(days=120)).isoformat(),
+    )
+
+    diagnostics = restored.get_diagnostics()
+    assert diagnostics["deadtime_cycles"] == pytest.approx(2.0)
+    assert diagnostics["deadtime_minutes"] == pytest.approx(10.0)
+    assert diagnostics["deadtime_confidence"] == pytest.approx(0.9)
+    assert diagnostics["debug"]["deadtime_locked"] is True
+    assert diagnostics["debug"]["deadtime_on_locked"] is True
 
 
 def test_warm_start_restores_estimator_history_and_keeps_adaptive_gains() -> None:

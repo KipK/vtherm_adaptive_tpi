@@ -58,14 +58,15 @@ Coarse deadtime estimator using a time-to-first-rise method.
 Responsibilities:
 
 - keep a temporally contiguous cycle history
-- detect rising power edges (OFF→ON transitions) and measure the delay
-  until the first visible temperature rise (`RISE_EPSILON` cumulative or
-  `RISE_EPSILON_STEP` per cycle)
-- aggregate identifications via weighted median over the last `N_HIST`
-  events and lock when spread (in cycles) and quality conditions are met
+- detect power edges separately for OFF -> ON and ON -> OFF transitions
+- measure the delay until the first visible temperature response leaves the transition deadtime
+- aggregate each transition family via weighted median over the last `N_HIST`
+  events and latch reliability when spread (in cycles) and quality conditions are met
 - expose:
   - `nd_hat`
   - `c_nd`
+  - `deadtime_on_*`
+  - `deadtime_off_*`
   - best and second-best candidates
   - a deadtime-side proxy for `b`
 
@@ -92,8 +93,9 @@ Responsibilities:
 
 The learning blackout depends on deadtime:
 
-- blackout of `ceil(nd_hat)` cycles after a regime transition
-- with a minimum safety blackout of `1` cycle when deadtime is not yet known
+- ON windows use the ON deadtime (`nd_hat`, the historical alias)
+- OFF windows use the OFF deadtime when it is acquired
+- without an acquired OFF deadtime, OFF windows keep only the minimum safety guard and do not borrow the ON deadtime indefinitely
 
 The setpoint-jump guard is regime-oriented:
 
@@ -181,17 +183,16 @@ When VT starts a real cycle, the plugin captures:
 
 This snapshot becomes the pending cycle context.
 
-Before deadtime exists, the runtime may temporarily bypass the nominal P+feedforward
-command and use the startup bootstrap sequence instead:
+Before ON and OFF deadtimes exist, the runtime may temporarily bypass the nominal
+P+feedforward command and use the startup bootstrap sequence instead:
 
-- if `current_temp >= target_temp`, command `0%` until `target_temp - 0.3°C`
-- if `current_temp < target_temp`, command `100%` until `target_temp`
-- once the room reached `target_temp`, command `0%` until `target_temp - 0.3°C`
-- from `target_temp - 0.3°C`, command `100%` until `target_temp`
+- command `0%` until `target_temp - 0.5°C`
+- command `100%` from that low threshold until `target_temp + 0.3°C`
+- command `0%` and let the room return to `target_temp`
+- repeat the complete cycle until both ON and OFF deadtimes are acquired
 - every bootstrap threshold crossing forces an immediate scheduler restart so the current cycle can end without waiting for its nominal boundary
-- if no deadtime identification was produced, repeat one more OFF->ON cycle
-- after the second failed attempt, return to nominal regulation
 - the OFF cooldown cycles created by this sequence may also feed the first `b` updates, even when they start near setpoint
+- a cold emitter at the beginning of the useful sequence improves identification quality because residual heat can hide the true OFF -> ON delay
 
 ### 2. Cycle end
 
@@ -208,9 +209,14 @@ The deadtime model evaluates the candidate set and updates:
 - `nd_hat`
 - `c_nd`
 - `deadtime_locked`
+- `deadtime_on_*`
+- `deadtime_off_*`
 - candidate costs
 
-It also exposes a temporary `b` proxy from the best candidate fit.
+The historical fields are aliases of the ON family. The ON family is still used
+for gain projection and ON learning. The OFF family is used for OFF window
+blackout when available. A locked family remains reliable until an explicit
+learning reset.
 
 ### 4. Window extraction
 
@@ -236,7 +242,8 @@ Routing logic is:
 - `a` waits for:
   - credible deadtime
   - converged `b`
-- both `a` and `b` are blocked while the candidate window still lies in the deadtime blackout after a regime transition
+- `a` is blocked while the candidate ON window still lies in the ON deadtime blackout
+- `b` is blocked by the OFF deadtime blackout only after the OFF family has been acquired
 - mixed cycles do not feed `a` or `b`
 
 The deadtime-side `b` proxy is also used as a light bootstrap seed for the explicit `b` estimator when no OFF sample has been accepted yet.
@@ -388,7 +395,8 @@ Purpose: steady-state long-term operation.
 - Both `a` and `b` continue to adapt slowly.
 - This is the nominal operating regime.
 
-No automatic exit. The phase stays D indefinitely unless a warm-start revalidation occurs.
+No automatic exit. The phase stays D indefinitely unless runtime conditions
+drive the supervisor back to an earlier phase.
 
 ---
 
@@ -408,21 +416,19 @@ No automatic exit. The phase stays D indefinitely unless a warm-start revalidati
 
 When persistent state is loaded after a gap:
 
-- **Gap > 30 days**: confidences are halved (`decay_confidences(0.5)`). If `c_nd` falls below 0.6, `deadtime_locked` is cleared and the phase is stepped back to B.
-- **Gap > 90 days**: confidences are fully reset and the phase is stepped back to A.
+- **Gap > 30 days**: `a` and `b` confidences are halved (`decay_confidences(0.5)`). Deadtime locks are preserved.
 - **`cycle_min` changed**: persisted `a` and `b` values are stored per hour, and deadtime is stored in minutes. On load they are converted to the current scheduler period while preserving confidences, samples, and phase.
 
 ---
 
 ### `deadtime_locked` and what clears it
 
-`deadtime_locked` is recomputed every cycle. It is `False` when any of the following is true:
+`deadtime_locked` is the public alias of `deadtime_on_locked`. It latches to
+`True` once the ON family satisfies the spread and confidence criteria. Later
+inconsistent observations may prevent a fresh aggregate from locking, but they
+do not clear the last locked ON estimate used by the runtime.
 
-- fewer than 10 accepted cycles in the deadtime model (`"deadtime_insufficient_cycles"`)
-- best-candidate dominance ratio < 2.0 over the second-best (`"deadtime_insufficient_separation"`)
-- best candidate won fewer than 7 of the last 10 cycles (`"deadtime_inconsistent_winner"`)
-- confidence decay after > 30 days drops `c_nd` below 0.6
-- full confidence reset after a gap > 90 days
+It is cleared by explicit learning reset.
 
 The compact `last_runtime_blocker` diagnostic always names the active blocker.
 

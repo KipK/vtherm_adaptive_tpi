@@ -22,6 +22,8 @@
   'active_to_target': 'Active to setpoint',
   'passive_drift_phase': 'Passive drift',
   'reactivation_to_target': 'Reactivation to setpoint',
+  'reactivation_to_upper_target': 'Reactivation to upper target',
+  'return_to_target': 'Return to setpoint',
   'completed': 'Completed',
   'abandoned': 'Stopped'
 } %}
@@ -48,6 +50,14 @@ No `specific_states.adaptive_tpi` data found for `{{ entity }}`.
 {% set deadtime_minutes = diag.get('deadtime_minutes') %}
 {% set deadtime_cycles = diag.get('deadtime_cycles') %}
 {% set deadtime_confidence = diag.get('deadtime_confidence') %}
+{% set deadtime_on_minutes = diag.get('deadtime_on_minutes') %}
+{% set deadtime_on_cycles = diag.get('deadtime_on_cycles') %}
+{% set deadtime_on_confidence = diag.get('deadtime_on_confidence') %}
+{% set deadtime_on_locked = diag.get('deadtime_on_locked') %}
+{% set deadtime_off_minutes = diag.get('deadtime_off_minutes') %}
+{% set deadtime_off_cycles = diag.get('deadtime_off_cycles') %}
+{% set deadtime_off_confidence = diag.get('deadtime_off_confidence') %}
+{% set deadtime_off_locked = diag.get('deadtime_off_locked') %}
 {% set gain_indoor = diag.get('gain_indoor') %}
 {% set gain_outdoor = diag.get('gain_outdoor') %}
 {% set control_rate = diag.get('control_rate_per_hour') %}
@@ -76,6 +86,10 @@ No `specific_states.adaptive_tpi` data found for `{{ entity }}`.
 {% set committed_cycle_text = ((committed_cycle * 100) | round(0) ~ ' %') if committed_cycle is not none else 'Unavailable' %}
 {% set deadtime_text = (deadtime_minutes | round(1) ~ ' min') if deadtime_minutes is not none else ((deadtime_cycles | round(2) ~ ' cycle(s)') if deadtime_cycles is not none else 'Not measured') %}
 {% set deadtime_conf_text = ((deadtime_confidence * 100) | round(0) ~ ' %') if deadtime_confidence is not none else 'Unavailable' %}
+{% set deadtime_on_text = (deadtime_on_minutes | round(1) ~ ' min') if deadtime_on_minutes is not none else ((deadtime_on_cycles | round(2) ~ ' cycle(s)') if deadtime_on_cycles is not none else 'Not measured') %}
+{% set deadtime_off_text = (deadtime_off_minutes | round(1) ~ ' min') if deadtime_off_minutes is not none else ((deadtime_off_cycles | round(2) ~ ' cycle(s)') if deadtime_off_cycles is not none else 'Not measured') %}
+{% set deadtime_on_conf_text = ((deadtime_on_confidence * 100) | round(0) ~ ' %') if deadtime_on_confidence is not none else 'Unavailable' %}
+{% set deadtime_off_conf_text = ((deadtime_off_confidence * 100) | round(0) ~ ' %') if deadtime_off_confidence is not none else 'Unavailable' %}
 {% set gain_indoor_text = (gain_indoor | round(3)) if gain_indoor is not none else 'Unavailable' %}
 {% set gain_outdoor_text = (gain_outdoor | round(3)) if gain_outdoor is not none else 'Unavailable' %}
 {% set control_rate_text = (control_rate | round(2) ~ ' °C/h') if control_rate is not none else 'Pending' %}
@@ -84,6 +98,7 @@ No `specific_states.adaptive_tpi` data found for `{{ entity }}`.
 {% set actuator_mode_text = actuator_mode or 'Unavailable' %}
 {% set valve_curve_status_text = 'Stable' if valve_curve_converged else ('Learning enabled' if valve_curve_learning_enabled else 'Frozen') %}
 {% set valve_curve_reason_text = valve_curve_last_reason if valve_curve_last_reason else 'None' %}
+{% set startup_attempt_text = startup_attempt ~ ' / ∞' if startup_attempt is not none and startup_max == 0 else (startup_attempt ~ ' / ' ~ startup_max if startup_attempt is not none and startup_max is not none else 'Unavailable') %}
 
 ## 🧠 {{ name }}
 
@@ -101,6 +116,8 @@ No `specific_states.adaptive_tpi` data found for `{{ entity }}`.
 |---|---|
 | ⏳ Deadtime | **{{ deadtime_text }}** |
 | 🎯 Deadtime confidence | **{{ deadtime_conf_text }}** |
+| ⏱️ Deadtime ON | **{{ deadtime_on_text }} · {{ 'locked' if deadtime_on_locked else 'learning' }} · {{ deadtime_on_conf_text }}** |
+| 📴 Deadtime OFF | **{{ deadtime_off_text }} · {{ 'locked' if deadtime_off_locked else 'learning' }} · {{ deadtime_off_conf_text }}** |
 | 🎚️ Indoor gain | **{{ gain_indoor_text }}** |
 | 🌤️ Outdoor gain | **{{ gain_outdoor_text }}** |
 | {{ icon_control }} {{ label_control }} | **{{ control_rate_text }}** |
@@ -148,8 +165,10 @@ No `specific_states.adaptive_tpi` data found for `{{ entity }}`.
 | Startup sequence | Value |
 |---|---|
 | 🪜 Stage | **{{ stage }}** |
-| 🔄 Attempt | **{{ startup_attempt ~ ' / ' ~ startup_max if startup_attempt is not none and startup_max is not none else 'Unavailable' }}** |
+| 🔄 Attempt | **{{ startup_attempt_text }}** |
 | 🏁 Completion | **{{ '`' ~ startup_done ~ '`' if startup_done else 'In progress' }}** |
+| ⏱️ ON acquired | **{{ 'Yes' if deadtime_on_locked else 'No' }}** |
+| 📴 OFF acquired | **{{ 'Yes' if deadtime_off_locked else 'No' }}** |
 {% endif %}
 
 {% if debug %}
@@ -182,6 +201,14 @@ No `specific_states.adaptive_tpi` data found for `{{ entity }}`.
 | `nd_hat` | {{ debug.get('nd_hat') | round(2) if debug.get('nd_hat') is not none else 'Unavailable' }} |
 | `deadtime_min` | {{ (debug.get('deadtime_min') | round(1) ~ ' min') if debug.get('deadtime_min') is not none else 'Unavailable' }} |
 | `deadtime_locked` | {{ 'Yes' if debug.get('deadtime_locked') else 'No' }} |
+| `deadtime_on_cycles` | {{ debug.get('deadtime_on_cycles') | round(2) if debug.get('deadtime_on_cycles') is not none else 'Unavailable' }} |
+| `deadtime_on_minutes` | {{ (debug.get('deadtime_on_minutes') | round(1) ~ ' min') if debug.get('deadtime_on_minutes') is not none else 'Unavailable' }} |
+| `deadtime_on_confidence` | {{ ((debug.get('deadtime_on_confidence') * 100) | round(0) ~ ' %') if debug.get('deadtime_on_confidence') is not none else 'Unavailable' }} |
+| `deadtime_on_locked` | {{ 'Yes' if debug.get('deadtime_on_locked') else 'No' }} |
+| `deadtime_off_cycles` | {{ debug.get('deadtime_off_cycles') | round(2) if debug.get('deadtime_off_cycles') is not none else 'Unavailable' }} |
+| `deadtime_off_minutes` | {{ (debug.get('deadtime_off_minutes') | round(1) ~ ' min') if debug.get('deadtime_off_minutes') is not none else 'Unavailable' }} |
+| `deadtime_off_confidence` | {{ ((debug.get('deadtime_off_confidence') * 100) | round(0) ~ ' %') if debug.get('deadtime_off_confidence') is not none else 'Unavailable' }} |
+| `deadtime_off_locked` | {{ 'Yes' if debug.get('deadtime_off_locked') else 'No' }} |
 | `deadtime_pending_step` | {{ 'Yes' if debug.get('deadtime_pending_step') else 'No' }} |
 | `deadtime_identification_count` | {{ debug.get('deadtime_identification_count', 'unavailable') }} |
 | `deadtime_b_proxy` | {{ debug.get('deadtime_b_proxy') | round(4) if debug.get('deadtime_b_proxy') is not none else 'Unavailable' }} |

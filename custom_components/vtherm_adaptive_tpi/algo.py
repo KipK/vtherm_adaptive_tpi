@@ -28,7 +28,7 @@ from .adaptive_tpi.startup_bootstrap import (
 )
 from .adaptive_tpi.mode import hvac_mode_sign
 from .adaptive_tpi.state import AdaptiveTPIState
-from .adaptive_tpi.supervisor import AdaptiveTPISupervisor, PHASE_A, PHASE_B
+from .adaptive_tpi.supervisor import AdaptiveTPISupervisor, PHASE_B
 from .adaptive_tpi.valve_curve import ValveCurveParams, build_valve_curve
 from .const import (
     ACTUATOR_MODE_VALVE,
@@ -41,7 +41,6 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 _CONFIDENCE_DECAY_30_DAYS = 30
-_CONFIDENCE_DECAY_90_DAYS = 90
 _MIN_DEADTIME_OUTDOOR_DELTA = 1.0
 _MIN_ESTIMATOR_SETPOINT_ERROR = 0.2
 _MIN_ESTIMATOR_OUTDOOR_DELTA = 1.0
@@ -165,6 +164,8 @@ class AdaptiveTPIAlgorithm:
                     target_temp=target_temp,
                     current_temp=current_temp,
                     deadtime_identification_count=self._state.deadtime_identification_count,
+                    deadtime_on_locked=self._state.deadtime_on_locked,
+                    deadtime_off_locked=self._state.deadtime_off_locked,
                     heating_enabled=heating_enabled,
                     mode_sign=sign,
                 )
@@ -189,6 +190,8 @@ class AdaptiveTPIAlgorithm:
             target_temp=target_temp,
             current_temp=current_temp,
             deadtime_identification_count=self._state.deadtime_identification_count,
+            deadtime_on_locked=self._state.deadtime_on_locked,
+            deadtime_off_locked=self._state.deadtime_off_locked,
             heating_enabled=heating_enabled,
             mode_sign=sign,
         )
@@ -394,9 +397,15 @@ class AdaptiveTPIAlgorithm:
         pending_mode_sign = hvac_mode_sign(completed_cycle.hvac_mode)
         if current_cycle_regime == WINDOW_REGIME_OFF:
             self._state.learning_route_selected = "b"
+            nd_hat_for_off = (
+                self._state.deadtime_off_cycles
+                if self._state.deadtime_off_locked
+                and self._state.deadtime_off_cycles is not None
+                else 0.0
+            )
             off_window = build_anchored_learning_window(
                 observations,
-                nd_hat=self._state.nd_hat,
+                nd_hat=nd_hat_for_off,
                 regime=WINDOW_REGIME_OFF,
                 end_index=anchored_end_index,
                 mode_sign=pending_mode_sign,
@@ -603,6 +612,14 @@ class AdaptiveTPIAlgorithm:
                 self._deadtime_model.reset()
                 self._state.nd_hat = 0.0
                 self._state.deadtime_minutes = None
+                self._state.deadtime_on_cycles = None
+                self._state.deadtime_on_minutes = None
+                self._state.deadtime_on_confidence = 0.0
+                self._state.deadtime_on_locked = False
+                self._state.deadtime_off_cycles = None
+                self._state.deadtime_off_minutes = None
+                self._state.deadtime_off_confidence = 0.0
+                self._state.deadtime_off_locked = False
                 self._state.c_nd = 0.0
                 self._state.deadtime_locked = False
                 self._state.deadtime_best_candidate = None
@@ -637,6 +654,26 @@ class AdaptiveTPIAlgorithm:
                 deadtime_result = self._deadtime_model.last_result
                 self._state.nd_hat = deadtime_result.nd_hat
                 self._state.deadtime_minutes = deadtime_result.nd_minutes
+                self._state.deadtime_on_cycles = (
+                    deadtime_result.nd_hat_on
+                    if deadtime_result.nd_hat_on is not None
+                    else deadtime_result.nd_hat
+                )
+                self._state.deadtime_on_minutes = (
+                    deadtime_result.nd_minutes_on
+                    if deadtime_result.nd_minutes_on is not None
+                    else deadtime_result.nd_minutes
+                )
+                self._state.deadtime_on_confidence = (
+                    deadtime_result.c_nd_on or deadtime_result.c_nd
+                )
+                self._state.deadtime_on_locked = (
+                    deadtime_result.deadtime_on_locked or deadtime_result.locked
+                )
+                self._state.deadtime_off_cycles = deadtime_result.nd_hat_off
+                self._state.deadtime_off_minutes = deadtime_result.nd_minutes_off
+                self._state.deadtime_off_confidence = deadtime_result.c_nd_off
+                self._state.deadtime_off_locked = deadtime_result.deadtime_off_locked
                 self._state.c_nd = deadtime_result.c_nd
                 self._state.deadtime_locked = deadtime_result.locked
                 self._state.deadtime_best_candidate = deadtime_result.best_candidate
@@ -644,6 +681,8 @@ class AdaptiveTPIAlgorithm:
                 self._state.deadtime_b_proxy = deadtime_result.best_candidate_b
                 self._state.deadtime_identification_count = len(
                     self._deadtime_model._identifications
+                ) + len(
+                    self._deadtime_model._identifications_off
                 )
                 self._state.deadtime_identification_qualities = deadtime_result.candidate_costs
                 self._state.deadtime_pending_step = self._deadtime_tracker.has_pending_step
@@ -752,12 +791,34 @@ class AdaptiveTPIAlgorithm:
         """Mirror one deadtime result into the public adaptive state."""
         self._state.nd_hat = deadtime_result.nd_hat
         self._state.deadtime_minutes = deadtime_result.nd_minutes
+        self._state.deadtime_on_cycles = (
+            deadtime_result.nd_hat_on
+            if deadtime_result.nd_hat_on is not None
+            else deadtime_result.nd_hat
+        )
+        self._state.deadtime_on_minutes = (
+            deadtime_result.nd_minutes_on
+            if deadtime_result.nd_minutes_on is not None
+            else deadtime_result.nd_minutes
+        )
+        self._state.deadtime_on_confidence = (
+            deadtime_result.c_nd_on or deadtime_result.c_nd
+        )
+        self._state.deadtime_on_locked = (
+            deadtime_result.deadtime_on_locked or deadtime_result.locked
+        )
+        self._state.deadtime_off_cycles = deadtime_result.nd_hat_off
+        self._state.deadtime_off_minutes = deadtime_result.nd_minutes_off
+        self._state.deadtime_off_confidence = deadtime_result.c_nd_off
+        self._state.deadtime_off_locked = deadtime_result.deadtime_off_locked
         self._state.c_nd = deadtime_result.c_nd
         self._state.deadtime_locked = deadtime_result.locked
         self._state.deadtime_best_candidate = deadtime_result.best_candidate
         self._state.deadtime_second_best_candidate = deadtime_result.second_best_candidate
         self._state.deadtime_b_proxy = deadtime_result.best_candidate_b
-        self._state.deadtime_identification_count = len(self._deadtime_model._identifications)
+        self._state.deadtime_identification_count = len(
+            self._deadtime_model._identifications
+        ) + len(self._deadtime_model._identifications_off)
         self._state.deadtime_identification_qualities = deadtime_result.candidate_costs
         self._state.deadtime_pending_step = self._deadtime_tracker.has_pending_step
         self._supervisor.apply_deadtime_result(
@@ -819,14 +880,6 @@ class AdaptiveTPIAlgorithm:
             return True
 
         age_days = (self._utc_now() - reference_time).days
-        if age_days > _CONFIDENCE_DECAY_90_DAYS:
-            self._state.reset_confidences()
-            self._state.bootstrap_phase = PHASE_A
-            self._supervisor.set_phase(PHASE_A)
-            self._supervisor.last_freeze_reason = "warm_start_revalidation_required"
-            self._state.last_freeze_reason = self._supervisor.last_freeze_reason
-            return False
-
         if age_days > _CONFIDENCE_DECAY_30_DAYS:
             self._state.decay_confidences(0.5)
             if not self._state.deadtime_locked:
@@ -856,6 +909,14 @@ class AdaptiveTPIAlgorithm:
 
         if self._state.deadtime_minutes is not None:
             self._state.nd_hat = self._state.deadtime_minutes / cycle_min
+        if self._state.deadtime_on_minutes is not None:
+            self._state.deadtime_on_cycles = (
+                self._state.deadtime_on_minutes / cycle_min
+            )
+        if self._state.deadtime_off_minutes is not None:
+            self._state.deadtime_off_cycles = (
+                self._state.deadtime_off_minutes / cycle_min
+            )
 
         best_candidate_minutes = self._mapping_float(
             data,
@@ -1067,6 +1128,7 @@ class AdaptiveTPIAlgorithm:
         self._state.startup_bootstrap_max_attempts = snapshot.max_attempts
         self._state.startup_bootstrap_target_temp = snapshot.target_temp
         self._state.startup_bootstrap_lower_target_temp = snapshot.lower_target_temp
+        self._state.startup_bootstrap_upper_target_temp = snapshot.upper_target_temp
         self._state.startup_bootstrap_command_on_percent = snapshot.command_on_percent
         self._state.startup_bootstrap_completion_reason = snapshot.completion_reason
 
@@ -1083,6 +1145,8 @@ class AdaptiveTPIAlgorithm:
             target_temp=target_temp,
             current_temp=current_temp,
             deadtime_identification_count=self._state.deadtime_identification_count,
+            deadtime_on_locked=self._state.deadtime_on_locked,
+            deadtime_off_locked=self._state.deadtime_off_locked,
             heating_enabled=sign != 0,
             mode_sign=sign,
         )

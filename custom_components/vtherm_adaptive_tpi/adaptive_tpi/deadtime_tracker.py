@@ -33,16 +33,22 @@ class _TrackedStep:
     previous_on_percent: float
     cycle_index: int
     b_proxy: float | None
+    transition: str
     last_measured_at: datetime
     last_temp: float
+    peak_temp: float
     candidate_started_at: datetime | None = None
     candidate_points_count: int = 0
 
     @property
     def base_quality(self) -> float:
         """Return the base identification quality for this clean step."""
-        q_power = min(1.0, self.on_percent)
-        q_edge = 1.0 if self.previous_on_percent <= OFF_POWER_CLEAN else 0.7
+        if self.transition == "off":
+            q_power = min(1.0, self.previous_on_percent)
+            q_edge = 1.0 if self.on_percent <= OFF_POWER_CLEAN else 0.7
+        else:
+            q_power = min(1.0, self.on_percent)
+            q_edge = 1.0 if self.previous_on_percent <= OFF_POWER_CLEAN else 0.7
         return q_power * q_edge
 
     @property
@@ -91,6 +97,14 @@ class DeadtimeTracker:
                 mode_sign != self._step.mode_sign
                 or target_temp is None
                 or abs(float(target_temp) - self._step.target_temp) > MAX_SETPOINT_JUMP
+                or (
+                    self._step.transition == "on"
+                    and current_on_percent < STEP_ABORT_POWER_NEW
+                )
+                or (
+                    self._step.transition == "off"
+                    and current_on_percent > OFF_POWER_MAX_NEW
+                )
             ):
                 self.reset()
             else:
@@ -101,13 +115,24 @@ class DeadtimeTracker:
                 )
                 return
 
+        transition: str | None = None
         if (
             mode_sign == 0
             or current_temp is None
             or target_temp is None
-            or current_on_percent < STEP_POWER_MIN_NEW
-            or previous_on_percent > OFF_POWER_MAX_NEW
         ):
+            return
+        if (
+            current_on_percent >= STEP_POWER_MIN_NEW
+            and previous_on_percent <= OFF_POWER_MAX_NEW
+        ):
+            transition = "on"
+        elif (
+            current_on_percent <= OFF_POWER_MAX_NEW
+            and previous_on_percent >= STEP_POWER_MIN_NEW
+        ):
+            transition = "off"
+        if transition is None:
             return
 
         current_temp = float(current_temp)
@@ -121,9 +146,11 @@ class DeadtimeTracker:
             on_percent=current_on_percent,
             previous_on_percent=previous_on_percent,
             cycle_index=cycle_index,
-            b_proxy=b_proxy,
+            b_proxy=b_proxy if transition == "on" else None,
+            transition=transition,
             last_measured_at=started_at,
             last_temp=current_temp,
+            peak_temp=current_temp,
         )
 
     def observe_temperature(
@@ -154,8 +181,14 @@ class DeadtimeTracker:
             return None
 
         current_temp = float(current_temp)
-        response_delta = step.mode_sign * (current_temp - step.start_temp)
-        incremental_delta = step.mode_sign * (current_temp - step.last_temp)
+        if step.transition == "off":
+            if step.mode_sign * (current_temp - step.peak_temp) > 0.0:
+                step.peak_temp = current_temp
+            response_delta = -step.mode_sign * (current_temp - step.peak_temp)
+            incremental_delta = -step.mode_sign * (current_temp - step.last_temp)
+        else:
+            response_delta = step.mode_sign * (current_temp - step.start_temp)
+            incremental_delta = step.mode_sign * (current_temp - step.last_temp)
         elapsed_min = max(
             0.0,
             (measured_at - step.started_at).total_seconds() / 60.0,
@@ -226,6 +259,7 @@ class DeadtimeTracker:
             quality=max(0.0, min(1.0, quality)),
             b_proxy=step.b_proxy,
             cycle_index=step.cycle_index,
+            transition=step.transition,
         )
 
     def _normalize_timestamp(self, measured_at: datetime | None) -> datetime:

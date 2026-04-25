@@ -18,6 +18,8 @@ _PUBLIC_STARTUP_STAGE_NAMES = {
     "preheat_to_target": "active_to_target",
     "cooldown_below_target": "passive_drift_phase",
     "reheat_to_target": "reactivation_to_target",
+    "reheat_to_upper_target": "reactivation_to_upper_target",
+    "cooldown_to_target": "return_to_target",
     "completed": "completed",
     "abandoned": "abandoned",
 }
@@ -35,8 +37,10 @@ def _per_hour(value_per_cycle: float, cycle_min: float | None) -> float | None:
     return value_per_cycle * (60.0 / cycle_min)
 
 
-def _deadtime_min(nd_hat: float, cycle_min: float | None) -> float | None:
+def _deadtime_min(nd_hat: float | None, cycle_min: float | None) -> float | None:
     """Convert a deadtime expressed in cycles into minutes when possible."""
+    if nd_hat is None:
+        return None
     if cycle_min is None or cycle_min <= 0:
         return None
     return nd_hat * cycle_min
@@ -47,6 +51,30 @@ def _published_deadtime_minutes(state: AdaptiveTPIState) -> float | None:
     if state.deadtime_minutes is not None:
         return state.deadtime_minutes
     return _deadtime_min(state.nd_hat, state.cycle_min_at_last_accepted_cycle)
+
+
+def _published_deadtime_on_cycles(state: AdaptiveTPIState) -> float | None:
+    """Return the ON-transition deadtime while preserving legacy aliases."""
+    if state.deadtime_on_cycles is not None:
+        return state.deadtime_on_cycles
+    return state.nd_hat
+
+
+def _published_deadtime_on_minutes(state: AdaptiveTPIState) -> float | None:
+    """Return the measured ON-transition deadtime in minutes when available."""
+    if state.deadtime_on_minutes is not None:
+        return state.deadtime_on_minutes
+    return _published_deadtime_minutes(state)
+
+
+def _published_deadtime_off_minutes(state: AdaptiveTPIState) -> float | None:
+    """Return the measured OFF-transition deadtime in minutes when available."""
+    if state.deadtime_off_minutes is not None:
+        return state.deadtime_off_minutes
+    return _deadtime_min(
+        state.deadtime_off_cycles,
+        state.cycle_min_at_last_accepted_cycle,
+    )
 
 
 def _tau_h(b_per_hour: float | None) -> float | None:
@@ -105,6 +133,14 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
         "deadtime_cycles": state.nd_hat,
         "deadtime_minutes": _published_deadtime_minutes(state),
         "deadtime_confidence": state.c_nd,
+        "deadtime_on_cycles": _published_deadtime_on_cycles(state),
+        "deadtime_on_minutes": _published_deadtime_on_minutes(state),
+        "deadtime_on_confidence": state.deadtime_on_confidence,
+        "deadtime_on_locked": state.deadtime_on_locked,
+        "deadtime_off_cycles": state.deadtime_off_cycles,
+        "deadtime_off_minutes": _published_deadtime_off_minutes(state),
+        "deadtime_off_confidence": state.deadtime_off_confidence,
+        "deadtime_off_locked": state.deadtime_off_locked,
         "control_rate_per_hour": a_per_hour,
         "drift_rate_per_hour": b_per_hour,
         "thermal_time_constant_hours": tau_h,
@@ -169,10 +205,12 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
             "startup_bootstrap_max_attempts": state.startup_bootstrap_max_attempts,
             "startup_bootstrap_target_temp": state.startup_bootstrap_target_temp,
             "startup_bootstrap_lower_target_temp": state.startup_bootstrap_lower_target_temp,
+            "startup_bootstrap_upper_target_temp": state.startup_bootstrap_upper_target_temp,
             "startup_bootstrap_command_on_percent": state.startup_bootstrap_command_on_percent,
             "startup_bootstrap_completion_reason": state.startup_bootstrap_completion_reason,
             "startup_sequence_target_temperature": state.startup_bootstrap_target_temp,
             "startup_sequence_cooling_temperature": state.startup_bootstrap_lower_target_temp,
+            "startup_sequence_heating_temperature": state.startup_bootstrap_upper_target_temp,
             "a_dispersion": state.a_dispersion,
             "b_dispersion": state.b_dispersion,
             "deadtime_identification_count": state.deadtime_identification_count,
@@ -193,6 +231,14 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
             "informative_deadtime_cycles_count": state.informative_deadtime_cycles_count,
             "adaptive_cycles_since_phase_c": state.adaptive_cycles_since_phase_c,
             "deadtime_locked": state.deadtime_locked,
+            "deadtime_on_cycles": _published_deadtime_on_cycles(state),
+            "deadtime_on_minutes": _published_deadtime_on_minutes(state),
+            "deadtime_on_confidence": state.deadtime_on_confidence,
+            "deadtime_on_locked": state.deadtime_on_locked,
+            "deadtime_off_cycles": state.deadtime_off_cycles,
+            "deadtime_off_minutes": _published_deadtime_off_minutes(state),
+            "deadtime_off_confidence": state.deadtime_off_confidence,
+            "deadtime_off_locked": state.deadtime_off_locked,
             "deadtime_pending_step": state.deadtime_pending_step,
             "deadtime_best_candidate": state.deadtime_best_candidate,
             "deadtime_second_best_candidate": state.deadtime_second_best_candidate,

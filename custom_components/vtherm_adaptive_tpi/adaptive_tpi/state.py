@@ -81,6 +81,14 @@ class AdaptiveTPIState:
     k_ext: float
     nd_hat: float = 0.0
     deadtime_minutes: float | None = None
+    deadtime_on_cycles: float | None = None
+    deadtime_on_minutes: float | None = None
+    deadtime_on_confidence: float = 0.0
+    deadtime_on_locked: bool = False
+    deadtime_off_cycles: float | None = None
+    deadtime_off_minutes: float | None = None
+    deadtime_off_confidence: float = 0.0
+    deadtime_off_locked: bool = False
     a_hat: float = 0.0
     b_hat: float = 0.0
     c_nd: float = 0.0
@@ -141,9 +149,10 @@ class AdaptiveTPIState:
     startup_bootstrap_active: bool = False
     startup_bootstrap_stage: str = "idle"
     startup_bootstrap_attempt: int = 0
-    startup_bootstrap_max_attempts: int = 2
+    startup_bootstrap_max_attempts: int = 0
     startup_bootstrap_target_temp: float | None = None
     startup_bootstrap_lower_target_temp: float | None = None
+    startup_bootstrap_upper_target_temp: float | None = None
     startup_bootstrap_command_on_percent: float | None = None
     startup_bootstrap_completion_reason: str | None = None
 
@@ -153,11 +162,23 @@ class AdaptiveTPIState:
         deadtime_minutes = self.deadtime_minutes
         if deadtime_minutes is None:
             deadtime_minutes = _minutes(self.nd_hat, cycle_min)
+        deadtime_on_minutes = self.deadtime_on_minutes
+        if deadtime_on_minutes is None:
+            deadtime_on_minutes = deadtime_minutes
+        deadtime_off_minutes = self.deadtime_off_minutes
+        if deadtime_off_minutes is None:
+            deadtime_off_minutes = _minutes(self.deadtime_off_cycles, cycle_min)
         data = {
             "persistence_units": "time_canonical",
             "k_int": self.k_int,
             "k_ext": self.k_ext,
             "deadtime_minutes": deadtime_minutes,
+            "deadtime_on_minutes": deadtime_on_minutes,
+            "deadtime_on_confidence": self.deadtime_on_confidence,
+            "deadtime_on_locked": self.deadtime_on_locked,
+            "deadtime_off_minutes": deadtime_off_minutes,
+            "deadtime_off_confidence": self.deadtime_off_confidence,
+            "deadtime_off_locked": self.deadtime_off_locked,
             "c_nd": self.c_nd,
             "c_a": self.c_a,
             "c_b": self.c_b,
@@ -221,6 +242,12 @@ class AdaptiveTPIState:
             "k_ext",
             "nd_hat",
             "deadtime_minutes",
+            "deadtime_on_cycles",
+            "deadtime_on_minutes",
+            "deadtime_on_confidence",
+            "deadtime_off_cycles",
+            "deadtime_off_minutes",
+            "deadtime_off_confidence",
             "a_hat",
             "b_hat",
             "c_nd",
@@ -263,6 +290,20 @@ class AdaptiveTPIState:
 
         if isinstance(data.get("deadtime_locked"), bool):
             self.deadtime_locked = data["deadtime_locked"]
+        if isinstance(data.get("deadtime_on_locked"), bool):
+            self.deadtime_on_locked = data["deadtime_on_locked"]
+        if isinstance(data.get("deadtime_off_locked"), bool):
+            self.deadtime_off_locked = data["deadtime_off_locked"]
+        if self.deadtime_on_cycles is None and (
+            self.nd_hat > 0.0 or self.deadtime_minutes is not None
+        ):
+            self.deadtime_on_cycles = self.nd_hat
+        if self.deadtime_on_minutes is None:
+            self.deadtime_on_minutes = self.deadtime_minutes
+        if self.deadtime_on_confidence <= 0.0:
+            self.deadtime_on_confidence = self.c_nd
+        if not self.deadtime_on_locked:
+            self.deadtime_on_locked = self.deadtime_locked
 
         if isinstance(data.get("b_converged"), bool):
             self.b_converged = data["b_converged"]
@@ -292,25 +333,16 @@ class AdaptiveTPIState:
 
     def reset_confidences(self) -> None:
         """Reset adaptive confidences and transient trust markers."""
-        self.c_nd = 0.0
         self.c_a = 0.0
         self.c_b = 0.0
         self.b_converged = False
-        self.deadtime_locked = False
-        self.deadtime_identification_count = 0
-        self.deadtime_identification_qualities = {}
         self.deadtime_pending_step = False
-        self.deadtime_best_candidate = None
-        self.deadtime_second_best_candidate = None
-        self.deadtime_b_proxy = None
         self.b_crosscheck_error = None
         self.b_methods_consistent = False
 
     def decay_confidences(self, factor: float) -> None:
         """Decay the stored confidences by a bounded multiplicative factor."""
         bounded_factor = min(max(factor, 0.0), 1.0)
-        self.c_nd *= bounded_factor
+        # Deadtime reliability is latched by explicit identification and reset.
         self.c_a *= bounded_factor
         self.c_b *= bounded_factor
-        if self.c_nd < 0.6:
-            self.deadtime_locked = False

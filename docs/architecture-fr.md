@@ -58,11 +58,14 @@ Estimateur de temps mort approximatif utilisant une méthode de temps jusqu'à l
 Responsabilités :
 
 - garder un historique de cycle temporellement contigu
-- détecter les fronts de montée de puissance (transitions OFF→ON) et mesurer le délai jusqu'à la première hausse visible de température (`RISE_EPSILON` cumulatif ou `RISE_EPSILON_STEP` par cycle)
-- agréger les identifications via la médiane pondérée sur les derniers `N_HIST` événements et verrouiller quand l'écart (en cycles) et les conditions de qualité sont remplies
+- détecter séparément les fronts de puissance OFF -> ON et ON -> OFF
+- mesurer le délai jusqu'à la première réponse thermique visible hors du temps mort de transition
+- agréger chaque famille de transition via la médiane pondérée sur les derniers `N_HIST` événements et verrouiller quand l'écart (en cycles) et les conditions de qualité sont remplies
 - exposer :
   - `nd_hat`
   - `c_nd`
+  - `deadtime_on_*`
+  - `deadtime_off_*`
   - les meilleurs et deuxième meilleur candidats
   - un proxy côté temps mort pour `b`
 
@@ -89,8 +92,9 @@ Responsabilités :
 
 Le silence d'apprentissage dépend du temps mort :
 
-- silence de `ceil(nd_hat)` cycles après une transition de régime
-- avec un silence de sécurité minimum de `1` cycle quand le temps mort n'est pas encore connu
+- les fenêtres ON utilisent le temps mort ON (`nd_hat`, alias historique)
+- les fenêtres OFF utilisent le temps mort OFF quand il est acquis
+- sans temps mort OFF acquis, les fenêtres OFF gardent seulement la garde minimale et n'empruntent pas indéfiniment le temps mort ON
 
 La garde de saut de point de consigne est orientée par régime :
 
@@ -181,14 +185,13 @@ Cet instantané devient le contexte de cycle en attente.
 
 Avant l'existence du temps mort, l'exécution peut temporairement contourner la commande P+anticipation nominale et utiliser la séquence de bootstrap de démarrage à la place :
 
-- si `current_temp >= target_temp`, commander `0%` jusqu'à `target_temp - 0.3°C`
-- si `current_temp < target_temp`, commander `100%` jusqu'à `target_temp`
-- une fois que la pièce a atteint `target_temp`, commander `0%` jusqu'à `target_temp - 0.3°C`
-- à partir de `target_temp - 0.3°C`, commander `100%` jusqu'à `target_temp`
+- commander `0%` jusqu'à `target_temp - 0.5°C`
+- commander `100%` depuis ce seuil bas jusqu'à `target_temp + 0.3°C`
+- commander `0%` et laisser la pièce revenir à `target_temp`
+- répéter le cycle complet jusqu'à acquisition des temps morts ON et OFF
 - chaque franchissement de seuil du bootstrap force un redémarrage immédiat de l'ordonnanceur afin que le cycle actuel puisse se terminer sans attendre sa limite nominale
-- si aucune identification de temps mort n'a été produite, répéter un cycle OFF->ON supplémentaire
-- après la deuxième tentative infructueuse, revenir à la régulation nominale
 - les cycles de refroidissement OFF créés par cette séquence peuvent également alimenter les premières mises à jour de `b`, même s'ils commencent près du point de consigne
+- un émetteur froid au début de la séquence utile améliore la qualité d'identification, car la chaleur résiduelle peut masquer le vrai délai OFF -> ON
 
 ### 2. Fin de cycle
 
@@ -205,9 +208,14 @@ Le modèle de temps mort évalue l'ensemble de candidats et met à jour :
 - `nd_hat`
 - `c_nd`
 - `deadtime_locked`
+- `deadtime_on_*`
+- `deadtime_off_*`
 - les coûts des candidats
 
-Il expose également un proxy `b` temporaire à partir de l'ajustement du meilleur candidat.
+Les champs historiques sont des alias de la famille ON. La famille ON reste utilisée
+pour la projection des gains et l'apprentissage ON. La famille OFF est utilisée
+pour le blackout des fenêtres OFF quand elle est disponible. Une famille verrouillée
+reste fiable jusqu'à un reset explicite de l'apprentissage.
 
 ### 4. Extraction de fenêtre
 
@@ -233,7 +241,8 @@ La logique d'acheminement est :
 - `a` attend :
   - un temps mort crédible
   - `b` convergent
-- à la fois `a` et `b` sont bloqués tant que la fenêtre candidate se trouve dans le silence de temps mort après une transition de régime
+- `a` est bloqué tant que la fenêtre ON candidate se trouve dans le blackout du temps mort ON
+- `b` est bloqué par le blackout du temps mort OFF seulement après acquisition de la famille OFF
 - les cycles mixtes n'alimentent pas `a` ou `b`
 
 Le proxy côté temps mort `b` est également utilisé comme une graine de bootstrap légère pour l'estimateur `b` explicite quand aucun échantillon OFF n'a été accepté encore.
@@ -385,7 +394,8 @@ Objectif : fonctionnement à l'état stable à long terme.
 - À la fois `a` et `b` continuent à s'adapter lentement.
 - C'est le régime de fonctionnement nominal.
 
-Pas de sortie automatique. La phase reste D indéfiniment à moins qu'une revalidation de démarrage à chaud se produise.
+Pas de sortie automatique. La phase reste D indéfiniment sauf si les conditions
+d'exécution ramènent le superviseur vers une phase antérieure.
 
 ---
 
@@ -405,21 +415,19 @@ Pas de sortie automatique. La phase reste D indéfiniment à moins qu'une revali
 
 Quand l'état persistant est chargé après une pause :
 
-- **Écart > 30 jours** : les confiances sont réduites de moitié (`decay_confidences(0.5)`). Si `c_nd` tombe en dessous de 0.6, `deadtime_locked` est effacé et la phase est reculée à B.
-- **Écart > 90 jours** : les confiances sont complètement réinitialisées et la phase est reculée à A.
+- **Écart > 30 jours** : les confiances `a` et `b` sont réduites de moitié (`decay_confidences(0.5)`). Les verrous de temps mort sont conservés.
 - **`cycle_min` changé** : les valeurs persistées de `a` et `b` sont stockées par heure, et le temps mort est stocké en minutes. Au chargement elles sont converties vers la période courante de l'ordonnanceur, en conservant les confiances, les échantillons et la phase.
 
 ---
 
 ### `deadtime_locked` et ce qui l'efface
 
-`deadtime_locked` est recalculé à chaque cycle. C'est `False` quand l'un des éléments suivants est vrai :
+`deadtime_locked` est l'alias public de `deadtime_on_locked`. Il passe à `True`
+quand la famille ON satisfait les critères d'écart et de confiance. Des observations
+ultérieures incohérentes peuvent empêcher un nouvel agrégat de verrouiller, mais
+elles n'effacent pas la dernière estimation ON verrouillée utilisée par l'exécution.
 
-- moins de 10 cycles acceptés dans le modèle de temps mort (`"deadtime_insufficient_cycles"`)
-- rapport de dominance du meilleur candidat < 2.0 sur le deuxième meilleur (`"deadtime_insufficient_separation"`)
-- le meilleur candidat a remporté moins de 7 des 10 derniers cycles (`"deadtime_inconsistent_winner"`)
-- décroissance de confiance après > 30 jours réduit `c_nd` en dessous de 0.6
-- réinitialisation complète de confiance après un écart > 90 jours
+Il est effacé par reset explicite de l'apprentissage.
 
 Le diagnostic compact `last_runtime_blocker` nomme toujours le bloqueur actif.
 

@@ -56,6 +56,14 @@ Interprétation :
 - `deadtime_cycles`
 - `deadtime_minutes`
 - `deadtime_confidence`
+- `deadtime_on_cycles`
+- `deadtime_on_minutes`
+- `deadtime_on_confidence`
+- `deadtime_on_locked`
+- `deadtime_off_cycles`
+- `deadtime_off_minutes`
+- `deadtime_off_confidence`
+- `deadtime_off_locked`
 
 Interprétation :
 
@@ -63,6 +71,9 @@ Interprétation :
 - `deadtime_minutes` est la valeur mesurée du temps mort en minutes attachée à l'estimation `deadtime_cycles` retenue
 - si aucune valeur mesurée en minutes n'est encore disponible, `deadtime_minutes` revient à la valeur normalisée construite depuis `deadtime_cycles` et la dernière durée de cycle acceptée
 - `deadtime_confidence` est la confiance dans cette estimation, dans `[0, 1]`
+- les champs historiques du temps mort sont des alias de la transition ON, mesurée après OFF -> ON
+- `deadtime_off_*` décrit la transition ON -> OFF utilisée par le blackout des fenêtres OFF quand elle est disponible
+- aucune valeur OFF n'est déduite des anciens instantanés à temps mort unique
 
 ### Taux de chauffage et de refroidissement
 
@@ -110,12 +121,14 @@ Valeurs possibles de `startup_sequence_stage` :
 - `active_to_target`
 - `passive_drift_phase`
 - `reactivation_to_target`
+- `reactivation_to_upper_target`
+- `return_to_target`
 - `completed`
-- `abandoned`
 
 Interprétation :
 
 - `startup_sequence_active = true` signifie que le bootstrap de démarrage remplace actuellement la commande nominale
+- `startup_sequence_max_attempts = 0` signifie que la séquence réessaie jusqu'à acquisition des temps morts ON et OFF
 - `current_cycle_percent` est la puissance engagée pour le cycle actuellement en cours
 - `next_cycle_percent` est la puissance demandée préparée pour le prochain cycle de l'ordonnanceur
 
@@ -171,6 +184,14 @@ Ce mappage conserve les noms orientés implémentation utilisés par l'algorithm
   - `deadtime_identification_qualities`
   - `deadtime_b_proxy`
   - `deadtime_locked`
+  - `deadtime_on_cycles`
+  - `deadtime_on_minutes`
+  - `deadtime_on_confidence`
+  - `deadtime_on_locked`
+  - `deadtime_off_cycles`
+  - `deadtime_off_minutes`
+  - `deadtime_off_confidence`
+  - `deadtime_off_locked`
   - `deadtime_pending_step`
   - `deadtime_best_candidate`
   - `deadtime_second_best_candidate`
