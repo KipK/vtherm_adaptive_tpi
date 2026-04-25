@@ -79,6 +79,7 @@ class AdaptiveTPIAlgorithm:
         default_kext: float = DEFAULT_KEXT,
         actuator_mode: str = ACTUATOR_MODE_SWITCH,
         valve_curve_params: ValveCurveParams | None = None,
+        valve_curve_compensation_enabled: bool = True,
         valve_curve_learning_enabled: bool = True,
     ) -> None:
         """Initialize the algorithm scaffold."""
@@ -91,10 +92,12 @@ class AdaptiveTPIAlgorithm:
         self._default_kext = default_kext
         self._actuator_mode = actuator_mode
         self._configured_valve_curve_params = valve_curve_params
+        self._valve_curve_compensation_enabled = valve_curve_compensation_enabled
         self._valve_curve_learning_enabled = valve_curve_learning_enabled
         self._valve_curve = build_valve_curve(
             actuator_mode,
             params=valve_curve_params,
+            compensation_enabled=valve_curve_compensation_enabled,
             learning_enabled=valve_curve_learning_enabled,
         )
         self._state = AdaptiveTPIState(
@@ -544,6 +547,7 @@ class AdaptiveTPIAlgorithm:
         self._valve_curve = build_valve_curve(
             self._actuator_mode,
             params=self._configured_valve_curve_params,
+            compensation_enabled=self._valve_curve_compensation_enabled,
             learning_enabled=self._valve_curve_learning_enabled,
         )
         self._refresh_valve_curve_state()
@@ -565,6 +569,7 @@ class AdaptiveTPIAlgorithm:
         self._valve_curve = build_valve_curve(
             self._actuator_mode,
             params=self._configured_valve_curve_params,
+            compensation_enabled=self._valve_curve_compensation_enabled,
             learning_enabled=self._valve_curve_learning_enabled,
         )
         self._refresh_valve_curve_state()

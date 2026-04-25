@@ -20,6 +20,7 @@ from .const import (
     CONF_MINIMAL_DEACTIVATION_DELAY,
     CONF_RESPONSIVENESS,
     CONF_TARGET_VTHERM,
+    CONF_VALVE_CURVE_COMPENSATION_ENABLED,
     CONF_VALVE_CURVE_LEARNING_ENABLED,
     CONF_VALVE_KNEE_DEMAND,
     CONF_VALVE_KNEE_VALVE,
@@ -106,6 +107,10 @@ def build_options_schema(defaults: dict[str, Any]) -> vol.Schema:
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
             ),
+            vol.Optional(
+                CONF_VALVE_CURVE_COMPENSATION_ENABLED,
+                default=defaults[CONF_VALVE_CURVE_COMPENSATION_ENABLED],
+            ): bool,
             vol.Optional(
                 CONF_VALVE_CURVE_LEARNING_ENABLED,
                 default=defaults[CONF_VALVE_CURVE_LEARNING_ENABLED],

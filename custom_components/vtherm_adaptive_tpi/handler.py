@@ -29,6 +29,7 @@ from .const import (
     CONF_RESPONSIVENESS,
     CONF_TARGET_VTHERM,
     CONF_THERMOSTAT_TYPE_KEY,
+    CONF_VALVE_CURVE_COMPENSATION_ENABLED,
     CONF_VALVE_CURVE_LEARNING_ENABLED,
     CONF_VALVE_KNEE_DEMAND,
     CONF_VALVE_KNEE_VALVE,
@@ -136,6 +137,12 @@ class AdaptiveTPIHandler:
                     entry.get(CONF_VALVE_KNEE_VALVE, DEFAULT_OPTIONS[CONF_VALVE_KNEE_VALVE])
                 ),
                 max_valve=float(entry.get(CONF_VALVE_MAX_VALVE, DEFAULT_OPTIONS[CONF_VALVE_MAX_VALVE])),
+            ),
+            valve_curve_compensation_enabled=bool(
+                entry.get(
+                    CONF_VALVE_CURVE_COMPENSATION_ENABLED,
+                    DEFAULT_OPTIONS[CONF_VALVE_CURVE_COMPENSATION_ENABLED],
+                )
             ),
             valve_curve_learning_enabled=bool(
                 entry.get(

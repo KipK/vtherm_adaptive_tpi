@@ -458,11 +458,12 @@ def build_valve_curve(
     persisted: Mapping[str, Any] | None = None,
     *,
     params: ValveCurveParams | None = None,
+    compensation_enabled: bool = True,
     learning_enabled: bool = True,
 ) -> ValveCurveProtocol:
     """Build the linearization curve for one actuator mode."""
     curve: ValveCurveProtocol
-    if actuator_mode == ACTUATOR_MODE_VALVE:
+    if actuator_mode == ACTUATOR_MODE_VALVE and compensation_enabled:
         curve = TwoSlopeValveCurve(
             params=params or VALVE_CURVE_DEFAULTS,
             learning_enabled=learning_enabled,

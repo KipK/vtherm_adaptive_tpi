@@ -131,7 +131,6 @@ def build_diagnostics(state: AdaptiveTPIState, debug_mode: bool) -> dict:
         "current_cycle_percent": state.committed_on_percent,
         "next_cycle_percent": state.requested_on_percent,
         "deadtime_cycles": state.nd_hat,
-        "deadtime_minutes": _published_deadtime_minutes(state),
         "deadtime_confidence": state.c_nd,
         "deadtime_on_cycles": _published_deadtime_on_cycles(state),
         "deadtime_on_minutes": _published_deadtime_on_minutes(state),
