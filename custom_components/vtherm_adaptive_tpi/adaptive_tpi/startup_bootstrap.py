@@ -19,7 +19,7 @@ STARTUP_BOOTSTRAP_ACTIVE_STAGES = (
     STARTUP_BOOTSTRAP_FINAL_COOLDOWN,
 )
 STARTUP_BOOTSTRAP_MAX_ATTEMPTS = 0
-STARTUP_BOOTSTRAP_LOWER_DELTA_C = 0.5
+STARTUP_BOOTSTRAP_LOWER_DELTA_C = 0.3
 STARTUP_BOOTSTRAP_UPPER_DELTA_C = 0.3
 
 
@@ -93,23 +93,18 @@ class StartupBootstrapController:
                 upper_target_temp=upper_target_temp,
                 command_on_percent=None,
             )
+        both_deadtimes_locked = deadtime_on_locked and deadtime_off_locked
         if (
-            deadtime_on_locked
-            and deadtime_off_locked
+            both_deadtimes_locked
             and self._stage in STARTUP_BOOTSTRAP_ACTIVE_STAGES
+            and self._stage != STARTUP_BOOTSTRAP_FINAL_COOLDOWN
         ):
-            self._stage = STARTUP_BOOTSTRAP_COMPLETED
-            self._completion_reason = "deadtime_on_off_identified"
+            self._stage = STARTUP_BOOTSTRAP_FINAL_COOLDOWN
+            self._completion_reason = None
             self._sync_force_state()
-            return self._snapshot(
-                target_temp=target_temp,
-                lower_target_temp=lower_target_temp,
-                upper_target_temp=upper_target_temp,
-                command_on_percent=None,
-            )
 
         if self._stage == STARTUP_BOOTSTRAP_IDLE:
-            if deadtime_on_locked and deadtime_off_locked:
+            if both_deadtimes_locked:
                 return self._snapshot(
                     target_temp=target_temp,
                     lower_target_temp=lower_target_temp,
@@ -181,7 +176,7 @@ class StartupBootstrapController:
 
         if self._stage == STARTUP_BOOTSTRAP_FINAL_COOLDOWN:
             if mode_sign * (current_temp - target_temp) <= 0:
-                if deadtime_on_locked and deadtime_off_locked:
+                if both_deadtimes_locked:
                     self._stage = STARTUP_BOOTSTRAP_COMPLETED
                     self._completion_reason = "deadtime_on_off_identified"
                     self._sync_force_state()
@@ -230,11 +225,15 @@ class StartupBootstrapController:
 
         lower_target_temp = target_temp - mode_sign * self._lower_delta_c
         upper_target_temp = target_temp + mode_sign * self._upper_delta_c
+        both_deadtimes_locked = deadtime_on_locked and deadtime_off_locked
         if (
-            deadtime_on_locked
-            and deadtime_off_locked
+            both_deadtimes_locked
             and self._stage in STARTUP_BOOTSTRAP_ACTIVE_STAGES
+            and self._stage != STARTUP_BOOTSTRAP_FINAL_COOLDOWN
         ):
+            self._stage = STARTUP_BOOTSTRAP_FINAL_COOLDOWN
+            self._completion_reason = None
+            self._sync_force_state()
             self._force_requested_for_stage = True
             return True
         if self._stage == STARTUP_BOOTSTRAP_PREHEAT:

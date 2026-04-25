@@ -37,6 +37,7 @@ from custom_components.vtherm_adaptive_tpi.adaptive_tpi.state import (
     PERSISTENCE_SCHEMA_VERSION,
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.startup_bootstrap import (
+    STARTUP_BOOTSTRAP_FINAL_COOLDOWN,
     StartupBootstrapController,
 )
 from custom_components.vtherm_adaptive_tpi.adaptive_tpi.valve_curve import (
@@ -666,8 +667,8 @@ def test_startup_bootstrap_retries_deadtime_cycle_in_cool_mode() -> None:
     assert diagnostics["startup_sequence_completion_reason"] == "deadtime_on_off_retry"
 
 
-def test_startup_bootstrap_completes_after_on_and_off_deadtime_cycle() -> None:
-    """Startup bootstrap should stop retrying once both deadtime families are acquired."""
+def test_startup_bootstrap_returns_to_target_after_on_and_off_deadtime_cycle() -> None:
+    """Startup bootstrap should drift back to target after both deadtime families lock."""
     algo = AdaptiveTPIAlgorithm(name="test-startup-bootstrap-complete")
 
     algo.calculate(
@@ -696,15 +697,28 @@ def test_startup_bootstrap_completes_after_on_and_off_deadtime_cycle() -> None:
     )
 
     diagnostics = algo.get_diagnostics()
-    assert diagnostics["startup_sequence_active"] is False
-    assert diagnostics["startup_sequence_stage"] == "completed"
-    assert diagnostics["startup_sequence_completion_reason"] == "deadtime_on_off_identified"
+    assert diagnostics["startup_sequence_active"] is True
+    assert diagnostics["startup_sequence_stage"] == "return_to_target"
+    assert diagnostics["startup_sequence_completion_reason"] is None
     assert algo.requested_on_percent == pytest.approx(0.0)
     assert algo.on_percent == pytest.approx(0.0)
 
+    algo.calculate(
+        target_temp=20.0,
+        current_temp=20.0,
+        ext_current_temp=20.0,
+        slope=None,
+        hvac_mode="heat",
+    )
 
-def test_startup_bootstrap_exits_if_both_deadtimes_arrive_after_reheat_cycle_closed() -> None:
-    """Delayed ON/OFF deadtime locks must stop bootstrap even after it fell back to cooldown."""
+    diagnostics = algo.get_diagnostics()
+    assert diagnostics["startup_sequence_active"] is False
+    assert diagnostics["startup_sequence_stage"] == "completed"
+    assert diagnostics["startup_sequence_completion_reason"] == "deadtime_on_off_identified"
+
+
+def test_startup_bootstrap_exits_at_target_if_both_deadtimes_arrive_after_reheat_cycle_closed() -> None:
+    """Delayed ON/OFF deadtime locks should complete once the target is reached."""
     algo = AdaptiveTPIAlgorithm(name="test-startup-bootstrap-late-deadtime")
 
     algo.calculate(
@@ -1888,6 +1902,18 @@ def test_startup_bootstrap_waits_for_on_and_off_deadtime_locks() -> None:
     )
     assert retry.active is True
     assert retry.completion_reason == "deadtime_on_off_retry"
+
+    completed = bootstrap.evaluate(
+        target_temp=20.0,
+        current_temp=20.3,
+        deadtime_identification_count=2,
+        deadtime_on_locked=True,
+        deadtime_off_locked=True,
+        heating_enabled=True,
+    )
+    assert completed.active is True
+    assert completed.stage == STARTUP_BOOTSTRAP_FINAL_COOLDOWN
+    assert completed.command_on_percent == pytest.approx(0.0)
 
     completed = bootstrap.evaluate(
         target_temp=20.0,

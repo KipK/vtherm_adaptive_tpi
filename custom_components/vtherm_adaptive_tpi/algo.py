@@ -476,11 +476,10 @@ class AdaptiveTPIAlgorithm:
 
         if estimator_update is not None:
             self._apply_estimator_update(estimator_update)
-            self._state.last_learning_attempt_reason = (
-                estimator_update.b_last_reason
-                if estimator_update.b_updated
-                else estimator_update.a_last_reason
-            )
+            if self._state.last_learning_attempt_regime == "b":
+                self._state.last_learning_attempt_reason = estimator_update.b_last_reason
+            else:
+                self._state.last_learning_attempt_reason = estimator_update.a_last_reason
             estimator_updated = estimator_update.updated
             self._state.learning_route_block_reason = None
         else:
