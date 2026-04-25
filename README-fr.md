@@ -42,8 +42,8 @@ Au démarrage, le plugin ne connaît pas encore la plante.
 
 La progression normale est :
 
-1. si aucune identification de temps mort n'existe encore, le bootstrap au démarrage peut forcer une ou deux tentatives propres OFF->ON
-2. le temps mort commence à émerger
+1. si les temps morts ON et OFF ne sont pas encore tous deux identifiés, le bootstrap au démarrage peut forcer des tentatives propres OFF->ON->OFF
+2. les temps morts ON et OFF commencent à émerger
 3. `b` commence l'apprentissage des fenêtres OFF
 4. `a` ne commence que plus tard, une fois que le temps mort est crédible et `b` est stable
 
@@ -69,14 +69,19 @@ La boucle d'exécution est :
 
 ## Bootstrap au démarrage
 
-Quand le temps mort est encore inconnu, le démarrage peut temporairement remplacer la commande nominale :
+Quand les temps morts ON et OFF ne sont pas encore tous deux identifiés, le démarrage peut temporairement remplacer la commande nominale.
 
-- si déjà au-dessus du point de consigne, rester OFF jusqu'à `target - 0.3°C`
-- si au-dessous du point de consigne, d'abord chauffer au point de consigne, puis refroidir à `target - 0.3°C`
-- à partir de `target - 0.3°C`, chauffer à `100%` jusqu'au point de consigne
+Pour que les observations du bootstrap soient exploitables, le radiateur doit être froid avant le début de la séquence.
+
+- si la température est déjà au-dessus du seuil bas, rester OFF jusqu'à `target - 0.5°C`
+- si la température est déjà sous le seuil bas, démarrer directement l'étape de chauffe
+- à partir de `target - 0.5°C`, chauffer à `100%` jusqu'à `target + 0.3°C`
+- commander ensuite `0%` jusqu'au retour au point de consigne
+- si les temps morts ON et OFF sont identifiés avant le retour au point de consigne, conserver l'étape finale OFF de retour à la consigne
+- si le temps mort ON ou OFF manque au point de consigne, réessayer le cycle complet de bootstrap
+- une fois les deux temps morts identifiés et le point de consigne atteint, revenir à la régulation normale
 - chaque franchissement de seuil du bootstrap force un redémarrage immédiat du cycle afin que l'ordonnanceur n'attende pas la limite de cycle précédente
-- si aucune identification de temps mort n'est produite, réessayer une fois, puis revenir à la régulation normale
-- le refroidissement OFF forcé peut également alimenter le chemin d'apprentissage initial de `b` même quand il démarre très proche du point de consigne
+- l'apprentissage de `b` reste régi par les règles normales des fenêtres OFF ; l'étape finale de retour à la consigne force seulement la commande à `0%`
 
 ## Diagnostiques
 
@@ -97,6 +102,12 @@ Les champs les plus utiles à inspecter en premier sont :
 - `startup_sequence_completion_reason`
 - `deadtime_cycles`
 - `deadtime_confidence`
+- `deadtime_on_cycles`
+- `deadtime_on_confidence`
+- `deadtime_on_locked`
+- `deadtime_off_cycles`
+- `deadtime_off_confidence`
+- `deadtime_off_locked`
 - `drift_rate_per_hour`
 - `drift_rate_confidence`
 - `drift_samples`

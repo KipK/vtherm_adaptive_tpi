@@ -48,8 +48,8 @@ At startup, the plugin does not know the plant yet.
 
 The normal progression is:
 
-1. if no deadtime identification exists yet, startup bootstrap may force one or two clean OFF->ON attempts
-2. deadtime starts to emerge
+1. if ON and OFF deadtimes are not both identified yet, startup bootstrap may force clean OFF->ON->OFF attempts
+2. ON and OFF deadtimes start to emerge
 3. `b` starts learning from OFF windows
 4. `a` starts only later, once deadtime is credible and `b` is stable
 
@@ -75,14 +75,19 @@ The runtime loop is:
 
 ## Startup Bootstrap
 
-When deadtime is still unknown, startup may temporarily override the nominal command:
+When ON and OFF deadtimes are not both identified yet, startup may temporarily override the nominal command.
 
-- if already at or above setpoint, stay OFF until `target - 0.3°C`
-- if below setpoint, first heat to setpoint, then cool to `target - 0.3°C`
-- from `target - 0.3°C`, heat at `100%` until setpoint
+For meaningful bootstrap observations, the radiator should be cold before the sequence starts.
+
+- if already above the low threshold, stay OFF until `target - 0.5°C`
+- if already below the low threshold, start the heating step directly
+- from `target - 0.5°C`, heat at `100%` until `target + 0.3°C`
+- then command `0%` until the room returns to the setpoint
+- if both ON and OFF deadtimes are identified before the setpoint is reached, keep the final OFF return-to-target step active
+- if either ON or OFF deadtime is missing at the setpoint, retry the complete bootstrap cycle
+- once both deadtimes are identified and the setpoint is reached, return to normal regulation
 - each bootstrap threshold crossing forces an immediate cycle restart so the scheduler does not wait for the previous cycle boundary
-- if no deadtime identification is produced, retry once, then fall back to normal regulation
-- the forced OFF cooldown may also feed the initial `b` learning path even when it starts very close to setpoint
+- `b` learning remains governed by the normal OFF-window rules; the final return-to-target step only forces the command to `0%`
 
 ## Diagnostics
 
@@ -103,6 +108,12 @@ The most useful fields to inspect first are:
 - `startup_sequence_completion_reason`
 - `deadtime_cycles`
 - `deadtime_confidence`
+- `deadtime_on_cycles`
+- `deadtime_on_confidence`
+- `deadtime_on_locked`
+- `deadtime_off_cycles`
+- `deadtime_off_confidence`
+- `deadtime_off_locked`
 - `drift_rate_per_hour`
 - `drift_rate_confidence`
 - `drift_samples`
