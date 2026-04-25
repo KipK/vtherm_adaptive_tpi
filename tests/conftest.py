@@ -21,8 +21,12 @@ def _install_homeassistant_stubs() -> None:
     homeassistant = types.ModuleType("homeassistant")
     config_entries = types.ModuleType("homeassistant.config_entries")
     core = types.ModuleType("homeassistant.core")
+    components = types.ModuleType("homeassistant.components")
+    climate = types.ModuleType("homeassistant.components.climate")
     helpers = types.ModuleType("homeassistant.helpers")
     storage = types.ModuleType("homeassistant.helpers.storage")
+    device_registry_mod = types.ModuleType("homeassistant.helpers.device_registry")
+    entity_registry_mod = types.ModuleType("homeassistant.helpers.entity_registry")
 
     class ConfigEntry:  # pragma: no cover - import shim
         """Placeholder config entry type for tests."""
@@ -44,15 +48,30 @@ def _install_homeassistant_stubs() -> None:
             """Accept writes in import-only contexts."""
             del data
 
+    def _stub_dr_async_get(hass):  # pragma: no cover - import shim
+        del hass
+        return None
+
+    def _stub_er_async_get(hass):  # pragma: no cover - import shim
+        del hass
+        return None
+
     config_entries.ConfigEntry = ConfigEntry
     core.HomeAssistant = HomeAssistant
     storage.Store = Store
+    climate.DOMAIN = "climate"
+    device_registry_mod.async_get = _stub_dr_async_get
+    entity_registry_mod.async_get = _stub_er_async_get
 
     sys.modules["homeassistant"] = homeassistant
     sys.modules["homeassistant.config_entries"] = config_entries
     sys.modules["homeassistant.core"] = core
+    sys.modules["homeassistant.components"] = components
+    sys.modules["homeassistant.components.climate"] = climate
     sys.modules["homeassistant.helpers"] = helpers
     sys.modules["homeassistant.helpers.storage"] = storage
+    sys.modules["homeassistant.helpers.device_registry"] = device_registry_mod
+    sys.modules["homeassistant.helpers.entity_registry"] = entity_registry_mod
 
 
 def _install_vtherm_api_stubs() -> None:

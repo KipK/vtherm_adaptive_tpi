@@ -7,7 +7,10 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.components.climate import DOMAIN as CLIMATE_DOMAIN
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.storage import Store
 
@@ -50,6 +53,8 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 _STORAGE_KEY_PREFIX = f"{DOMAIN}.state"
 _SUPPORTED_PERSISTENCE_SCHEMA_VERSIONS = {1, PERSISTENCE_SCHEMA_VERSION}
+
+VT_DOMAIN = "versatile_thermostat"
 
 
 class _AdaptiveTPIStore(Store):
@@ -103,6 +108,7 @@ class AdaptiveTPIHandler:
         self._should_publish_intermediate = True
         self._published_diagnostics: dict[str, Any] = {}
         self._cancel_temp_listener = None
+        self._applied_config_entry_id: str | None = None
         storage_key = self._build_storage_key(thermostat.unique_id)
         self._storage_key = storage_key
         self._store: Store[dict[str, Any]] = _AdaptiveTPIStore(
@@ -114,7 +120,10 @@ class AdaptiveTPIHandler:
     def init_algorithm(self) -> None:
         """Initialize Adaptive TPI algorithm."""
         t = self._thermostat
-        entry = self._get_effective_config()
+        entry, entry_to_apply = self._resolve_effective_config()
+        self._applied_config_entry_id = (
+            entry_to_apply.entry_id if entry_to_apply is not None else None
+        )
         actuator_mode = _resolve_effective_actuator_mode(entry, t.entry_infos or {})
 
         t.minimal_activation_delay = entry.get(CONF_MINIMAL_ACTIVATION_DELAY, 0)
@@ -157,6 +166,11 @@ class AdaptiveTPIHandler:
 
     def _get_effective_config(self) -> dict:
         """Return the merged Adaptive TPI configuration for the thermostat."""
+        config, _entry_to_apply = self._resolve_effective_config()
+        return config
+
+    def _resolve_effective_config(self) -> tuple[dict, Any]:
+        """Return the merged Adaptive TPI configuration and the applied config entry."""
         t = self._thermostat
         config = dict(DEFAULT_OPTIONS)
         config.update(t.entry_infos or {})
@@ -179,11 +193,74 @@ class AdaptiveTPIHandler:
             config.update(entry_to_apply.data)
             config.update(entry_to_apply.options)
 
-        return config
+        return config, entry_to_apply
+
+    def _get_target_device_id(self) -> str | None:
+        """Return the Home Assistant device id for the target thermostat."""
+        t = self._thermostat
+        registry = er.async_get(t.hass)
+
+        entity_id = getattr(t, "entity_id", None)
+        if entity_id:
+            reg_entry = registry.async_get(entity_id)
+            if reg_entry is not None and reg_entry.device_id:
+                return reg_entry.device_id
+
+        entity_id = registry.async_get_entity_id(
+            CLIMATE_DOMAIN,
+            VT_DOMAIN,
+            t.unique_id,
+        )
+        if not entity_id:
+            return None
+
+        reg_entry = registry.async_get(entity_id)
+        if reg_entry is not None and reg_entry.device_id:
+            return reg_entry.device_id
+        return None
+
+    def _bind_config_entry_to_device(self) -> None:
+        """Link the applied config entry to the target thermostat device."""
+        if self._applied_config_entry_id is None:
+            return
+        device_id = self._get_target_device_id()
+        if not device_id:
+            return
+        t = self._thermostat
+        dr.async_get(t.hass).async_update_device(
+            device_id,
+            add_config_entry_id=self._applied_config_entry_id,
+        )
+        _LOGGER.debug(
+            "%s - Bound config entry %s to device %s",
+            t,
+            self._applied_config_entry_id,
+            device_id,
+        )
+
+    def _unbind_config_entry_from_device(self) -> None:
+        """Unlink the applied config entry from the target thermostat device."""
+        if self._applied_config_entry_id is None:
+            return
+        device_id = self._get_target_device_id()
+        if not device_id:
+            return
+        t = self._thermostat
+        dr.async_get(t.hass).async_update_device(
+            device_id,
+            remove_config_entry_id=self._applied_config_entry_id,
+        )
+        _LOGGER.debug(
+            "%s - Unbound config entry %s from device %s",
+            t,
+            self._applied_config_entry_id,
+            device_id,
+        )
 
     async def async_added_to_hass(self) -> None:
         """Run startup actions when the thermostat entity is added."""
         await self._async_load_persisted_state()
+        self._bind_config_entry_to_device()
         self._register_temperature_listener()
 
     async def async_startup(self) -> None:
@@ -224,6 +301,7 @@ class AdaptiveTPIHandler:
 
     def remove(self) -> None:
         """Release resources held by the handler."""
+        self._unbind_config_entry_from_device()
         if self._cancel_temp_listener is not None:
             self._cancel_temp_listener()
             self._cancel_temp_listener = None
