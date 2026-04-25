@@ -174,11 +174,14 @@ class AdaptiveTPIAlgorithm:
                 )
             )
             self._state.calculated_on_percent = 0.0
-            self._state.requested_on_percent = 0.0
+            self._state.requested_on_percent = None
+            self._state.committed_on_percent = None
             self._temperature_available = False
             return
 
         self._temperature_available = True
+        if self._state.committed_on_percent is None:
+            self._state.committed_on_percent = 0.0
         command_on_percent = compute_on_percent(
             hvac_mode=hvac_mode,
             target_temp=target_temp,
@@ -222,7 +225,11 @@ class AdaptiveTPIAlgorithm:
         """Capture the committed cycle start conditions from the scheduler."""
         self._state.cycle_started_calls_count += 1
         self._state.last_cycle_started_at = self._utc_now().isoformat()
-        previous_committed_on_percent = self._state.committed_on_percent
+        previous_committed_on_percent = (
+            self._state.committed_on_percent
+            if self._state.committed_on_percent is not None
+            else 0.0
+        )
         self.update_realized_power(on_percent)
         applied_demand = self._valve_curve.invert(self._state.committed_on_percent)
         if target_temp is None or current_temp is None or ext_current_temp is None:
