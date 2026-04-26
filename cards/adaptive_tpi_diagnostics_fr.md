@@ -96,7 +96,8 @@ Aucune donnée `specific_states.adaptive_tpi` trouvée pour `{{ entity }}`.
 {% set drift_rate_text = (drift_rate | round(3) ~ ' 1/h') if drift_rate is not none else 'En attente' %}
 {% set tau_text = (tau_h | round(2) ~ ' h') if tau_h is not none else 'En attente' %}
 {% set actuator_mode_text = actuator_mode or 'Indisponible' %}
-{% set valve_curve_status_text = 'Stable' if valve_curve_converged else ('Apprentissage actif' if valve_curve_learning_enabled else 'Figée') %}
+{% set has_valve_curve_params = valve_curve_params is not none %}
+{% set valve_curve_status_text = 'Stable' if valve_curve_converged else ('Apprentissage actif' if valve_curve_learning_enabled else ('Compensation désactivée' if actuator_mode == 'valve' and not has_valve_curve_params else 'Figée')) %}
 {% set valve_curve_reason_text = valve_curve_last_reason if valve_curve_last_reason else 'Aucune' %}
 {% set startup_attempt_text = startup_attempt ~ ' / ∞' if startup_attempt is not none and startup_max == 0 else (startup_attempt ~ ' / ' ~ startup_max if startup_attempt is not none and startup_max is not none else 'Indisponible') %}
 
@@ -145,12 +146,14 @@ Aucune donnée `specific_states.adaptive_tpi` trouvée pour `{{ entity }}`.
 | 🛞 Commande vanne demandée      | **{{ requested_cycle_text }}**  |
 | ⚙️ Puissance appliquée          | **{{ committed_cycle_text }}**  |
 
+{% if has_valve_curve_params %}
 | Paramètres de courbe | Valeur                                     |
 | -------------------- | ------------------------------------------ |
 | `min_valve`          | **{{ valve_curve_params.get('min_valve')   | round(1) }} %** |
 | `knee_demand`        | **{{ valve_curve_params.get('knee_demand') | round(1) }} %** |
 | `knee_valve`         | **{{ valve_curve_params.get('knee_valve')  | round(1) }} %** |
 | `max_valve`          | **{{ valve_curve_params.get('max_valve')   | round(1) }} %** |
+{% endif %}
 {% endif %}
 
 | Dernière activité  | Valeur                                                               |
