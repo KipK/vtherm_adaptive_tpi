@@ -584,7 +584,7 @@ def test_startup_bootstrap_retries_deadtime_cycle_when_one_family_is_missing() -
 
     algo.calculate(
         target_temp=20.0,
-        current_temp=20.3,
+        current_temp=20.5,
         ext_current_temp=20.0,
         slope=None,
         hvac_mode="heat",
@@ -641,7 +641,7 @@ def test_startup_bootstrap_retries_deadtime_cycle_in_cool_mode() -> None:
 
     algo.calculate(
         target_temp=25.0,
-        current_temp=24.7,
+        current_temp=24.5,
         ext_current_temp=30.0,
         slope=None,
         hvac_mode="cool",
@@ -691,7 +691,7 @@ def test_startup_bootstrap_returns_to_target_after_on_and_off_deadtime_cycle() -
     algo._state.deadtime_off_locked = True
     algo.calculate(
         target_temp=20.0,
-        current_temp=20.3,
+        current_temp=20.5,
         ext_current_temp=20.0,
         slope=None,
         hvac_mode="heat",
@@ -738,7 +738,7 @@ def test_startup_bootstrap_exits_at_target_if_both_deadtimes_arrive_after_reheat
     )
     algo.calculate(
         target_temp=20.0,
-        current_temp=20.3,
+        current_temp=20.5,
         ext_current_temp=20.0,
         slope=None,
         hvac_mode="heat",
@@ -787,7 +787,7 @@ def test_startup_bootstrap_keeps_retrying_without_both_deadtimes() -> None:
     )
     algo.calculate(
         target_temp=20.0,
-        current_temp=20.3,
+        current_temp=20.5,
         ext_current_temp=20.0,
         slope=None,
         hvac_mode="heat",
@@ -891,7 +891,7 @@ def test_startup_bootstrap_forces_cycle_restart_once_when_reheat_reaches_target(
     assert (
         algo.should_force_bootstrap_cycle_restart(
             target_temp=20.0,
-            current_temp=20.3,
+            current_temp=20.5,
             hvac_mode="heat",
         )
         is True
@@ -921,7 +921,7 @@ def test_startup_bootstrap_detects_mid_cycle_command_flip_after_calculation() ->
 
     algo.calculate(
         target_temp=20.0,
-        current_temp=20.3,
+        current_temp=20.5,
         ext_current_temp=20.0,
         slope=None,
         hvac_mode="heat",
@@ -961,7 +961,7 @@ def test_startup_bootstrap_detects_mid_cycle_command_flip_after_thermostat_recal
 
     algo.calculate(
         target_temp=20.0,
-        current_temp=20.3,
+        current_temp=20.5,
         ext_current_temp=20.0,
         slope=None,
         hvac_mode="heat",
@@ -1884,7 +1884,7 @@ def test_startup_bootstrap_waits_for_on_and_off_deadtime_locks() -> None:
 
     final_cooldown = bootstrap.evaluate(
         target_temp=20.0,
-        current_temp=20.3,
+        current_temp=20.5,
         deadtime_identification_count=1,
         deadtime_on_locked=True,
         deadtime_off_locked=False,
