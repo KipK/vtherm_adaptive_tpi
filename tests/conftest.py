@@ -27,6 +27,7 @@ def _install_homeassistant_stubs() -> None:
     storage = types.ModuleType("homeassistant.helpers.storage")
     device_registry_mod = types.ModuleType("homeassistant.helpers.device_registry")
     entity_registry_mod = types.ModuleType("homeassistant.helpers.entity_registry")
+    helper_integration_mod = types.ModuleType("homeassistant.helpers.helper_integration")
 
     class ConfigEntry:  # pragma: no cover - import shim
         """Placeholder config entry type for tests."""
@@ -56,12 +57,31 @@ def _install_homeassistant_stubs() -> None:
         del hass
         return None
 
+    def _stub_entries_for_config_entry(
+        registry,
+        config_entry_id,
+    ):  # pragma: no cover - import shim
+        del registry, config_entry_id
+        return []
+
+    def _stub_remove_helper_config_entry_from_source_device(
+        hass,
+        *,
+        helper_config_entry_id,
+        source_device_id,
+    ):  # pragma: no cover - import shim
+        del hass, helper_config_entry_id, source_device_id
+
     config_entries.ConfigEntry = ConfigEntry
     core.HomeAssistant = HomeAssistant
     storage.Store = Store
     climate.DOMAIN = "climate"
     device_registry_mod.async_get = _stub_dr_async_get
+    device_registry_mod.async_entries_for_config_entry = _stub_entries_for_config_entry
     entity_registry_mod.async_get = _stub_er_async_get
+    helper_integration_mod.async_remove_helper_config_entry_from_source_device = (
+        _stub_remove_helper_config_entry_from_source_device
+    )
 
     sys.modules["homeassistant"] = homeassistant
     sys.modules["homeassistant.config_entries"] = config_entries
@@ -72,6 +92,7 @@ def _install_homeassistant_stubs() -> None:
     sys.modules["homeassistant.helpers.storage"] = storage
     sys.modules["homeassistant.helpers.device_registry"] = device_registry_mod
     sys.modules["homeassistant.helpers.entity_registry"] = entity_registry_mod
+    sys.modules["homeassistant.helpers.helper_integration"] = helper_integration_mod
 
 
 def _install_vtherm_api_stubs() -> None:

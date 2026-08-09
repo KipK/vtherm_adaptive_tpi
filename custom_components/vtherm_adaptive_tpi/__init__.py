@@ -22,6 +22,7 @@ from .const import (
     SERVICE_RESET_LEARNING,
     SERVICE_RESET_VALVE_CURVE,
 )
+from .device_link import cleanup_config_entry_devices
 from .factory import AdaptiveTPIHandlerFactory
 
 _LOGGER = get_vtherm_logger(__name__)
@@ -292,6 +293,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up vtherm_adaptive_tpi from a config entry."""
     data = _ensure_domain_data(hass)
     data[entry.entry_id] = entry.entry_id
+    cleanup_config_entry_devices(hass, entry.entry_id)
     entry.async_on_unload(entry.add_update_listener(_async_update_options))
     _register_factory(hass)
     _register_services(hass)
